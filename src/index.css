@@ -1,0 +1,74 @@
+:root {
+  font-family: 'Chakra Petch', system-ui, -apple-system, sans-serif;
+  background-color: #0f172a;
+  color: #ffffff;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
+  background-color: #0f172a;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+::-webkit-scrollbar-thumb {
+  background: #f472b6;
+  border-radius: 4px;
+}
+
+/* 3D Candy Text Shadow Effects */
+.candy-text-pink {
+  color: #db2777;
+  text-shadow: 
+    2px 2px 0px #fbcfe8,
+    4px 4px 0px #831843;
+}
+
+.candy-text-cyan {
+  color: #0284c7;
+  text-shadow: 
+    2px 2px 0px #bae6fd,
+    4px 4px 0px #0369a1;
+}
+
+.candy-text-yellow {
+  color: #d97706;
+  text-shadow: 
+    2px 2px 0px #fef08a,
+    4px 4px 0px #92400e;
+}
+
+/* Utility Layout Classes */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.flex-row { flex-direction: row; }
+.flex-1 { flex: 1 1 0%; }
+.flex-wrap { flex-wrap: wrap; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.justify-center { justify-content: center; }
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.cursor-pointer { cursor: pointer; }
+.pointer-events-none { pointer-events: none; }
+
+.w-full { width: 100%; }
+.h-full { height: 100%; }
+.w-screen { width: 100vw; }
+.h-screen { height: 100vh; }
+.relative { position: relative; }
+.absolute { position: absolute; }
+.fixed { position: fixed; }
+.inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+.overflow-hidden { overflow: hidden; }
