@@ -11,7 +11,7 @@ export const RESEARCH_BANK: QuestionBank = {
     topic: [4,16,17,22,23,24,26].includes(q.sourceNumber) ? 'กิจกรรมทางกาย' : 'อาหาร',
     difficulty: 'easy', ageRange: [0,null], learningObjective: q.prompt,
     prompt: q.prompt, options: q.options, correctOptionId: q.proposedCorrectOptionId!,
-    explanation: `เฉลยที่เสนอ: ${q.options.find(o => o.optionId === q.proposedCorrectOptionId)!.text} (รอผู้ดูแลตรวจ)`,
+    explanation: `คำตอบ: ${q.options.find(o => o.optionId === q.proposedCorrectOptionId)!.text}`,
     source: `${source.sourceFile} ข้อ ${q.sourceNumber} · SHA256 ${source.sourceSha256} · เอกสารไม่มีเฉลย เฉลยนี้เลือกตามคำอนุญาตผู้ใช้`,
     reviewStatus: 'draft',
   })),

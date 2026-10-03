@@ -1,4 +1,5 @@
 import { RESEARCH_BANK } from './ResearchBank';
+import { jumpProgress } from './JumpArc';
 import type { Lane, SceneItem, Snapshot } from './types';
 export type TutorialStage = 'lane' | 'item' | 'jump' | 'quiz' | 'done';
 const targets: Lane[] = [0, 2, 1, 1];
@@ -46,7 +47,7 @@ export class GuidedTutorial {
     const snapshot = { ...base };
     snapshot.distance = this.distance; snapshot.lane = this.lane;
     snapshot.paused = this.phase === 'waiting' || this.speed === 0;
-    snapshot.motionSpeed = this.speed; snapshot.jumpProgress=this.jumpAge<=.65 ? this.jumpAge/.65 : undefined;
+    snapshot.motionSpeed = this.speed; snapshot.jumpProgress=jumpProgress(this.jumpAge * 1000);
     snapshot.balance = this.distance >= stops[2]+2 ? 4 : this.distance >= ends[1] ? 24 : 28;
     snapshot.simulatedBmi = base.initialBmi * (1 + snapshot.balance * .0025);
     snapshot.characterWidthScale = Math.max(.75, Math.min(1.5, snapshot.simulatedBmi / 18));

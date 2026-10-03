@@ -1,4 +1,5 @@
 import { isExercise, createItemLayout, itemBalance, simulatedBmi } from './ItemCatalog';
+import { jumpProgress, jumpHeight, GROUND_CLEARANCE_HEIGHT, JUMP_COOLDOWN_MS } from './JumpArc';
 import type { Lane, InputMode, PlannedQuestion, Profile, RunRecord, SceneItem, Snapshot, Phase, Outcome } from './types';
 
 export const COURSE_SPEED = 16;
@@ -7,7 +8,8 @@ export const LEVEL_DISTANCE = COURSE_SPEED * TARGET_RUN_SECONDS;
 export const GATE_SPACING = LEVEL_DISTANCE / 10;
 export const QUIZ_SECONDS = 6;
 export const QUIZ_APPROACH_DISTANCE = COURSE_SPEED * QUIZ_SECONDS;
-export const LEVEL_VERSION = 'learning-dense-avoidance-100-items-10-gates-v8';
+export const COURSE_VIEW_DISTANCE = COURSE_SPEED * 14;
+export const LEVEL_VERSION = 'learning-continuous-course-ground-jump-v9';
 export const SCORING_VERSION = 'learning-1500-v2';
 export const BODY_MODEL_VERSION = 'bmi-small-food-large-exercise-v4';
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -16,7 +18,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 export class RunSession {
   private jumpStarted = -Infinity;
   jump(): boolean {
-    if (this.paused || !this.controlValid || this.phase === 'terminal' || this.record.activePlayMs-this.jumpStarted < 700) return false;
+    if (this.paused || !this.controlValid || this.phase === 'terminal' || this.record.activePlayMs-this.jumpStarted < JUMP_COOLDOWN_MS) return false;
     this.jumpStarted=this.record.activePlayMs; this.record.jumpAttempts=(this.record.jumpAttempts ?? 0)+1; return true;
   }
   private phase: Phase = 'running';
@@ -44,6 +46,7 @@ export class RunSession {
     this.record = {
       schemaVersion: 1, runId: options.runId, playerId: profile.playerId, startedAt: options.startedAt,
       outcome: 'in_progress', ageMonthsAtStart: profile.ageMonths, agePrecision: profile.agePrecision ?? 'months', profileVersion: profile.version,
+      playerNameAtStart: profile.nickname, sexAtStart: profile.sex,
       levelVersion: LEVEL_VERSION, scoringVersion: SCORING_VERSION, contentVersion: options.contentVersion, blueprintVersion: options.blueprintVersion,
       seed: options.seed, demo: options.demo, plannedQuestions: structuredClone(questions), answers: [], distance: 0, activePlayMs: 0,
       initialBmi, simulatedBmi: initialBmi, bodyModelVersion: BODY_MODEL_VERSION,
@@ -104,7 +107,8 @@ export class RunSession {
       const row = events.filter(e => e.distance === d);
       const chosen = row.find(e => e.lane === this.lane);
       row.forEach(e => this.processed.add(e.id));
-      if (chosen && (!isExercise(chosen.type) || (this.record.activePlayMs-this.jumpStarted <= 650))) this.applyItem(chosen);
+      const airborne = jumpHeight(jumpProgress(this.record.activePlayMs - this.jumpStarted)) >= GROUND_CLEARANCE_HEIGHT;
+      if (chosen && (isExercise(chosen.type) ? airborne : !airborne)) this.applyItem(chosen);
       else if (row.some(e => isExercise(e.type))) this.record.exerciseMissed=(this.record.exerciseMissed ?? 0)+1;
 
     }
@@ -162,14 +166,14 @@ export class RunSession {
     this.record.score = this.record.correctCount * 100 + Math.round(this.record.balancedDistance / LEVEL_DISTANCE * 200) + (outcome === 'completed' ? 300 : 0);
   }
   visibleItems(): SceneItem[] {
-    if (!['running','quiz_feedback'].includes(this.phase)) return [];
-    const checkpoint = this.questionIndex < 10 ? (this.questionIndex + 1) * GATE_SPACING : LEVEL_DISTANCE;
-    return this.items.filter(e => !this.processed.has(e.id) && e.distance > this.record.distance && e.distance - this.record.distance < COURSE_SPEED * 10 && e.distance < checkpoint - (this.questionIndex < 10 ? QUIZ_APPROACH_DISTANCE : 0));
+    if (this.phase === 'terminal') return [];
+    // Visibility is independent of quiz state: food beyond the gate stays in the scene.
+    return this.items.filter(e => !this.processed.has(e.id) && e.distance > this.record.distance && e.distance - this.record.distance <= COURSE_VIEW_DISTANCE);
   }
   snapshot(): Snapshot {
     const initialBmi = this.record.initialBmi!;
     const simulatedBmi = this.record.simulatedBmi!;
-    return structuredClone({ jumpProgress: this.record.activePlayMs-this.jumpStarted <= 650 ? (this.record.activePlayMs-this.jumpStarted)/650 : undefined, initialBmi, simulatedBmi, characterWidthScale: clamp(simulatedBmi / 18, .75, 1.5), phase: this.phase, paused: this.paused, distance: this.record.distance, balance: this.record.balance,
+    return structuredClone({ jumpProgress: jumpProgress(this.record.activePlayMs-this.jumpStarted), initialBmi, simulatedBmi, characterWidthScale: clamp(simulatedBmi / 18, .75, 1.5), phase: this.phase, paused: this.paused, distance: this.record.distance, balance: this.record.balance,
       balancedDistance: this.record.balancedDistance, lane: this.lane, wrongStreak: this.wrongStreak, questionIndex: this.questionIndex,
       question: this.record.plannedQuestions[this.questionIndex], lastAnswer: this.record.answers[this.record.answers.length - 1],
       approachProgress: this.selectionMs / (QUIZ_SECONDS * 1000),

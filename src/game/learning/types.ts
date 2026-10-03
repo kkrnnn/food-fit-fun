@@ -72,6 +72,8 @@ export interface RunRecord {
   ageMonthsAtStart: number;
   agePrecision?: 'years' | 'months';
   profileVersion: number;
+  playerNameAtStart?: string;
+  sexAtStart?: Profile['sex'];
   levelVersion: string;
   scoringVersion: string;
   contentVersion: string;

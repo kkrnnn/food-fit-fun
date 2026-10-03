@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { createQuestionSet, DEMO_BANK, parseBank } from './QuestionDeck';
 import { RunSession, LEVEL_DISTANCE, GATE_SPACING, COURSE_SPEED, QUIZ_APPROACH_DISTANCE, QUIZ_SECONDS, TARGET_RUN_SECONDS } from './RunSession';
 import type { DeckState, Profile, QuestionBank } from './types';
+import { visibleGateDistance } from './CoursePresentation';
+import { jumpHeight, GROUND_CLEARANCE_HEIGHT } from './JumpArc';
 
 export const PROFILE: Profile = { playerId: 'test-player', nickname: 'ทดสอบ', version: 1, sex: 'male', ageMonths: 120, heightCm: 140, weightKg: 35, activity: 'active', avatar: 'mint' };
 export const makeRun = (mode: 'manual' | 'camera' = 'manual', id = 'run-1') => new RunSession(PROFILE, createQuestionSet(DEMO_BANK, 120, { contentVersion: DEMO_BANK.contentVersion, counts: {} }, 42, true), {
@@ -17,6 +19,43 @@ export function answer(run: RunSession, correct: boolean) {
 }
 
 describe('learning run through the public commands', () => {
+  it('jumps above a ground item without collecting it, while a landed runner collects', () => {
+    for (const airborne of [true,false]) {
+      const run = makeRun(); const item = run.visibleItems()[0];
+      const lead = airborne ? .25 : 1;
+      run.setLane(item.lane); run.advance(item.distance / COURSE_SPEED - lead);
+      run.drainEvents(); const before = run.snapshot();
+      expect(run.jump()).toBe(true); run.advance(lead);
+      const after = run.snapshot();
+      if (airborne) {
+        expect(jumpHeight(after.jumpProgress)).toBeGreaterThan(GROUND_CLEARANCE_HEIGHT);
+        expect(after.simulatedBmi).toBe(before.simulatedBmi);
+        expect(after.record.itemCounts[item.type]).toBeUndefined();
+        expect(run.drainEvents()).toEqual([]);
+      } else {
+        expect(after.jumpProgress).toBeUndefined();
+        expect(after.record.itemCounts[item.type]).toBe(1);
+      }
+    }
+  });
+  it('keeps food behind the gate visible before, during and after the answer', () => {
+    const run = makeRun();
+    run.advance((GATE_SPACING - QUIZ_APPROACH_DISTANCE - 1) / COURSE_SPEED);
+    const before = run.snapshot();
+    expect(visibleGateDistance(before)).toBe(QUIZ_APPROACH_DISTANCE + 1);
+    const waitingFood = run.visibleItems().filter(item => item.distance > GATE_SPACING);
+    expect(waitingFood.length).toBeGreaterThan(0);
+    run.advance(1 / COURSE_SPEED);
+    expect(run.snapshot().phase).toBe('quiz_approach');
+    expect(visibleGateDistance(run.snapshot())).toBe(QUIZ_APPROACH_DISTANCE);
+    waitingFood.forEach(item => expect(run.visibleItems()).toContainEqual(item));
+    const q = run.snapshot().question!;
+    run.setLane(q.options.findIndex(o => o.optionId === q.question.correctOptionId) as 0|1|2);
+    run.advance(QUIZ_SECONDS);
+    expect(run.snapshot().record.answers).toHaveLength(1);
+    waitingFood.forEach(item => expect(run.visibleItems()).toContainEqual(item));
+    expect(run.snapshot().record.itemCounts[waitingFood[0].type] ?? 0).toBe(before.record.itemCounts[waitingFood[0].type] ?? 0);
+  });
   it('ends on exactly three consecutive wrong answers, with seven unreached and one terminal result', () => {
     const run = makeRun();
     for (let i = 0; i < 3; i++) { answer(run, false); if (i < 2) run.continueAfterFeedback(); }

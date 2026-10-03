@@ -6,8 +6,7 @@ import { RunSession, LEVEL_DISTANCE, COURSE_SPEED } from '../../game/learning/Ru
 import { createQuestionSet, DEMO_BANK } from '../../game/learning/QuestionDeck';
 import type { InputMode, Lane, Profile, Snapshot } from '../../game/learning/types';
 import { RunRepository, highScore, type StoredData } from '../analytics/RunRepository';
-import { AnalyticsPanel } from '../analytics/AnalyticsPanel';
-import { ProfileForm, HealthSummary, newProfile } from '../profile/ProfileForm';
+import { ProfileForm, newProfile } from '../profile/ProfileForm';
 import './LearningGame.css';
 import { Practice } from './Practice';
 import { GuidedTutorial } from '../../game/learning/GuidedTutorial';
@@ -20,8 +19,10 @@ import { ITEM_CATALOG } from '../../game/learning/ItemCatalog';
 import { manualLane } from '../../game/learning/ManualLane';
 import { swipeLane, swipeJump } from '../../game/learning/SwipeLane';
 import { bmiMeter } from '../health/assessment';
+import { FeedbackPanel } from '../analytics/FeedbackPanel';
+import { AnalyticsSync, deliveryText, type SyncStatus } from '../analytics/AnalyticsSync';
 
-type Screen = 'intro' | 'profile' | 'ready' | 'tutorial' | 'armed' | 'warmup' | 'run' | 'result' | 'analytics';
+type Screen = 'intro' | 'profile' | 'ready' | 'tutorial' | 'armed' | 'warmup' | 'run' | 'result';
 const emptyData: StoredData = { profiles: [], runs: [], bank: null };
 const laneNames = ['ซ้าย', 'กลาง', 'ขวา'];
 function savedInputMode(): InputMode { try { return localStorage.getItem('food-fit-fun:input-mode') === 'manual' ? 'manual' : 'camera'; } catch { return 'camera'; } }
@@ -35,6 +36,9 @@ export function LearningGame() {
   const engineRef = useRef<GameEngine3D | null>(null);
   const sessionRef = useRef<RunSession | null>(null);
   const repository = useRef(new RunRepository());
+  const analyticsSync = useRef(new AnalyticsSync(repository.current));
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('checking');
+  const [cloudRecordCount, setCloudRecordCount] = useState(0);
   const cameraRef = useRef<CameraSession | null>(null);
   const mapper = useRef(new PoseMapper());
   const generation = useRef(0);
@@ -73,7 +77,7 @@ export function LearningGame() {
   const [countdown, setCountdown] = useState(0);
   const [sceneError, setSceneError] = useState('');
   const [deletePlayer, setDeletePlayer] = useState(false);
-  const [demo, setDemo] = useState(true);
+  const demo = true; // The fixed research bank retains its provisional key provenance.
   const [introOpen, setIntroOpen] = useState(true);
   const [introChecked, setIntroChecked] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -122,6 +126,17 @@ export function LearningGame() {
   canHoldRef.current = canHold;
 
   const refresh = async () => { const next = await repository.current.load(); setData(next); return next; };
+  const syncAnalytics = async () => {
+    try { setSyncStatus(await analyticsSync.current.flush()); setCloudRecordCount((await repository.current.analyticsData()).outbox.length); }
+    catch { setSyncStatus('error'); }
+  };
+  useEffect(() => {
+    void syncAnalytics();
+    const timer = window.setInterval(() => { if (!document.hidden) void syncAnalytics(); }, 15_000);
+    const online = () => { void syncAnalytics(); };
+    window.addEventListener('online', online);
+    return () => { window.clearInterval(timer); window.removeEventListener('online', online); };
+  }, []);
   const stopCamera = () => {
     generation.current++; cameraRef.current?.stop(); cameraRef.current = null;
     cameraValid.current = false; cameraCalibrated.current = false; mapper.current.reset();
@@ -130,7 +145,9 @@ export function LearningGame() {
   const saveProgress = (s: Snapshot) => {
     if (sessionOnly) return;
     const displayed = Math.max(s.record.answers.length, s.phase === 'quiz_approach' ? s.questionIndex + 1 : 0);
-    writeQueue.current = writeQueue.current.catch(() => {}).then(() => repository.current.saveRun(s.record, displayed)).catch(() => {
+    writeQueue.current = writeQueue.current.catch(() => {}).then(() => repository.current.saveRun(s.record, displayed)).then(() => {
+      if (s.record.outcome !== 'in_progress') void syncAnalytics();
+    }).catch(() => {
       setStorageError(true); setNotice('เล่นได้ แต่บันทึกผลไม่สำเร็จ กรุณาลองบันทึกอีกครั้ง');
     });
   };
@@ -217,7 +234,7 @@ export function LearningGame() {
     let interruptedId: string | null = null;
     try { interruptedId = sessionStorage.getItem('body-rush-tab-run'); sessionStorage.removeItem('body-rush-tab-run'); } catch {}
     void (interruptedId ? repository.current.recoverInterrupted(interruptedId) : Promise.resolve()).then(() => repository.current.load()).then(next => {
-      if (!active) return; setData(next); setDemo(true);
+      if (!active) return; setData(next);
       let id: string | null = null; try { id = localStorage.getItem('body-rush-active-player'); } catch {}
       const selected = next.profiles.find(p => p.playerId === id) ?? next.profiles[0] ?? null;
       setProfile(selected); if (selected) avatarRef.current = selected.avatar;
@@ -339,8 +356,6 @@ export function LearningGame() {
     try {
       await writeQueue.current;
       const bank = DEMO_BANK;
-      if (selected.playerId === 'demo-player' && !demo) throw new Error('โปรไฟล์ตัวอย่างใช้กับชุดทดลองเท่านั้น กรุณาสร้างผู้เล่นก่อนเก็บข้อมูลจริง');
-      if (!bank) throw new Error('ยังไม่มีคลังจริง กรุณาเลือกชุดทดลองหรือนำเข้าคำถาม');
       const deck = sessionOnly ? { contentVersion: bank.contentVersion, counts: {} } : await repository.current.deck(selected.playerId, bank.contentVersion);
       const seed = crypto.getRandomValues(new Uint32Array(1))[0];
       const questions = createQuestionSet(bank, selected.ageMonths, deck, seed, demo);
@@ -434,7 +449,7 @@ export function LearningGame() {
       <header className="lr-hud"><div className="lr-brand-small">FOOD <b>FIT FUN</b><small>{s.record.demo ? 'ชุดทดลอง' : 'ภารกิจเมืองสมดุล'}</small></div>
         <div className="lr-progress"><div><span>{inPractice ? 'ลองเล่น · ไม่บันทึกคะแนน' : <>เส้นชัย {Math.floor(s.distance / LEVEL_DISTANCE * 100)}% · เหลือ {Math.max(0, Math.ceil((LEVEL_DISTANCE - s.distance) / COURSE_SPEED))} วินาที</>}</span><strong>{inPractice ? 'ฝึกทีละขั้น' : <>คำถาม {Math.min(s.questionIndex + 1, 10)} / 10</>}</strong></div><progress value={inPractice ? lesson?.progress ?? 0 : s.distance} max={inPractice ? lesson?.total ?? 4 : LEVEL_DISTANCE} /></div>
         <div className={`lr-streak ${s.wrongStreak === 2 ? 'warning' : ''}`}><small>ผิดติดต่อกัน</small><strong>{s.wrongStreak} / 3</strong></div><button className="secondary" onClick={() => inPractice ? leaveRun() : pause('พักเกม')}>{inPractice ? 'กลับเมนู' : 'พัก'}</button></header>
-      <aside className="lr-balance"><span>BMI เริ่มต้น {s.initialBmi.toFixed(1)}</span><b className="lr-body-bmi">ตัวละคร {s.simulatedBmi.toFixed(1)} <em>จำลอง</em></b><div className="lr-meter" role="meter" aria-label="BMI ตัวละครจำลอง" aria-valuemin={0} aria-valuemax={Math.max(40, s.simulatedBmi)} aria-valuenow={s.simulatedBmi} aria-valuetext={meter?.label} style={{ background: meter?.gradient }}><i style={{ left: `${meter?.position ?? 50}%`, background: meter?.color }} /></div><strong style={{ color: meter?.color }}>{meter?.label}</strong><small>{profile?.agePrecision === 'years' ? 'เทียบช่วงอายุเป็นปี · สีเป็นค่าประมาณ' : 'เทียบตามอายุและเพศ'}</small></aside>
+      <aside className="lr-balance"><span>BMI เริ่มต้น {s.initialBmi.toFixed(1)}</span><b className="lr-body-bmi">ตัวละคร {s.simulatedBmi.toFixed(1)} <em>จำลอง</em></b><div className="lr-meter" role="meter" aria-label="BMI ตัวละครจำลอง" aria-valuemin={meter?.min ?? 0} aria-valuemax={meter?.max ?? 40} aria-valuenow={Math.max(meter?.min ?? 0, Math.min(meter?.max ?? 40, s.simulatedBmi))} aria-valuetext={`${s.simulatedBmi.toFixed(1)} · ${meter?.label}`} style={{ background: meter?.gradient }}><i style={{ left: `${meter?.position ?? 50}%`, background: meter?.color }} /></div><strong style={{ color: meter?.color }}>{meter?.label}</strong><small>{meter?.referenceLabel}</small></aside>
       {inPractice && lesson && <section className="lr-guided-tip" role="status"><p className="lr-kicker">ลองเล่น · ขั้น {lesson.progress+1} / {lesson.total}</p><h2>{lesson.success ? '✓ ใช่แล้ว! ไปต่อกัน' : lesson.stage === 'lane' ? 'ขยับไปหาแสง' : lesson.stage === 'item' ? 'เลือกเลนที่ไฮไลต์' : lesson.stage === 'jump' ? 'กระโดดเบา ๆ เพื่อเก็บสัญลักษณ์' : `เลือกคำตอบ: ${s.question?.options.find(o => o.optionId === s.question?.question.correctOptionId)?.text ?? ''}`}</h2><p>{lesson.success ? 'ฉากกำลังเดินต่อ' : !cameraReady && mode === 'camera' ? cameraStatus : lesson.stage === 'jump' ? (mode === 'camera' ? 'อยู่เลนกลาง ให้เห็นไหล่ถึงเอว แล้วกระโดดเบา ๆ' : 'อยู่เลนกลาง กด Space / ↑ หรือปัดขึ้น') : mode === 'camera' ? 'ขยับไหล่เข้าเลนที่ไฮไลต์ แล้วอยู่นิ่งสักครู่' : 'กด ← / → หรือ A / D หรือปัดจอ ไปเลนที่ไฮไลต์'}</p>{mode==='camera' && !cameraReady && <button className="secondary" onClick={()=>chooseMode('manual')}>ใช้ปุ่ม / ปัดจอแทน</button>}{lesson.stage==='item' && <small>ลองเก็บสัญลักษณ์ในเลนที่ไฮไลต์</small>}{lesson.stage==='quiz' && <small>ลองประตูคำตอบ</small>}<small className="lr-guided-bmi">BMI จำลอง {s.simulatedBmi.toFixed(1)} · เริ่ม {s.initialBmi.toFixed(1)}</small><div className="lr-tutorial-lanes" aria-hidden="true">{[0,1,2].map(i=><span key={i} className={i===lesson.target ? 'target' : ''}>{i===lesson.target ? '✦' : '·'}</span>)}</div><button className="lr-link" onClick={() => finishTutorial('skipped')}>ข้ามการฝึก</button></section>}
 
       {s.phase === 'quiz_approach' && <>
@@ -444,7 +459,7 @@ export function LearningGame() {
       {((s.paused && !inPractice) || countdown > 0) && <div className="lr-pause-shade"><section className="lr-pause"><p className="lr-kicker">{countdown ? 'เตรียมตัว' : 'พักไว้ก่อน'}</p><h2>{countdown || pauseReason}</h2>
         {!countdown && <><p>ระยะทางและคำตอบหยุดไว้ กลับมาตั้งท่าแล้วกดเล่นต่อ</p><div className="lr-actions"><button disabled={mode === 'camera' && !cameraReady} onClick={resume}>เล่นต่อ</button><button className="secondary" onClick={() => { chooseMode('manual'); setPauseReason('พร้อมใช้ปุ่มแล้ว กดเล่นต่อ'); }}>ใช้ปุ่มแทนกล้อง</button><button className="secondary" onClick={beginCamera}>เปิด / ตั้งกล้องใหม่</button><button className="secondary" onClick={leaveRun}>ออกจากรอบ</button></div></>}
       </section></div>}
-    </> : <div className={`lr-page ${['intro','ready'].includes(screen) ? 'title' : ''}`}><div className={`lr-sheet ${screen === 'analytics' ? 'wide' : ['intro','ready'].includes(screen) ? 'lr-title-stage' : ''}`}>
+    </> : <div className={`lr-page ${['intro','ready'].includes(screen) ? 'title' : ''}`}><div className={`lr-sheet ${['intro','ready'].includes(screen) ? 'lr-title-stage' : ''}`}>
       {notice && <div className="lr-notice" role="status">{notice}{storageError && <button className="secondary" onClick={async () => {
         if (!sessionRef.current) return;
         await writeQueue.current;
@@ -467,35 +482,36 @@ export function LearningGame() {
       }} /></>}
       {screen === 'armed' && <section className="lr-gesture-start"><p className="lr-kicker">{recovery.current.active ? `เกมพักไว้ · ${profile?.nickname}` : `พร้อมออกวิ่ง · ${profile?.nickname}`}</p>{recovery.current.active && <p className="lr-recovery-note">{pauseReason} · {warmup.current ? 'ฝึกต่อจากขั้นเดิม' : `คำถาม ${Math.min((snapshot?.questionIndex ?? 0)+1,10)} / 10`}</p>}<h1>{cameraReady ? (recovery.current.active ? 'ยกมือค้างไว้เพื่อเล่นต่อ' : 'ยกมือค้างไว้เพื่อเริ่ม') : (recovery.current.active ? 'ตั้งท่ากลางใหม่ก่อนเล่นต่อ' : 'ตั้งท่ากลางก่อนเริ่ม')}</h1><div className="lr-hold-ring" role="progressbar" aria-label={recovery.current.active ? 'ยกมือค้างเพื่อเล่นต่อ' : 'ยกมือค้างเพื่อเริ่ม'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(holdProgress*100)} style={{ '--hold': `${holdProgress*360}deg` } as React.CSSProperties}><span>✋</span></div><p className="lr-gesture-instruction">{holdProgress > 0 ? 'ค้างไว้อีกนิด…' : cameraReady ? 'ลดมือลงก่อน แล้วยกมือข้างใดข้างหนึ่งเหนือไหล่ค้าง 1.5 วินาที' : cameraStatus}</p><div className="lr-actions"><button className="secondary" onClick={beginCamera}>ตั้งกล้องใหม่</button><button disabled={!cameraReady || busy} onClick={() => void start(activeProfile.current ?? undefined)}>{recovery.current.active ? 'เล่นต่อด้วยปุ่ม' : 'เริ่มด้วยปุ่ม'}</button><button className="secondary" onClick={() => { chooseMode('manual'); void start(activeProfile.current ?? undefined); }}>ใช้ปุ่ม / ปัดจอ</button><button className="lr-link" onClick={() => { hold.current.reset();leaveRun(); }}>กลับ</button></div></section>}
       {screen === 'tutorial' && <>
-        <p className="lr-kicker">ก่อนออกวิ่ง</p><h1>เลือกให้พอดี ตอบให้เข้าใจ</h1><ol className="lr-tutorial"><li><strong>เลือกเลน</strong><p>กล้อง: เลื่อนไหล่ซ้าย–ขวาจากท่ากลาง · ปุ่ม: ← / → หรือ A / D เลื่อนทีละเลน · มือถือปัดซ้าย–ขวา กระโดดเก็บสัญลักษณ์ออกกำลังกาย: กล้องกระโดดเบา ๆ · ปุ่ม Space / ↑ · มือถือปัดขึ้น</p></li><li><strong>เลือกของให้สมดุล</strong><p>อาหารดีลด BMI เล็กน้อย · ของออกกำลังกายลอยสูง ต้องกระโดดเก็บและลดมากกว่า · เก็บพลาดไม่เปลี่ยนค่า</p></li><li><strong>วิ่งเข้าประตูคำตอบ</strong><p>คำถามและคำตอบอยู่ด้านบน มีประตูแสดงคำตอบ เลือกเลนในช่วง 6 วินาทีก่อนถึงประตู เกมวิ่งต่อและล็อกคำตอบเมื่อผ่านประตู</p></li><li><strong>ผิดติดกัน 3 ข้อจบรอบ</strong><p>ตอบถูกรีเซ็ตการผิดติดกัน ประตูคำถามข้อ 10 คือเส้นชัย จบแล้วทบทวนเหตุผลได้ทั้งเมื่อแพ้และถึงเส้นชัย</p></li></ol><Practice mode={mode} cameraReady={cameraReady} detectedLane={detectedLane} /><p className="lr-muted">BMI จากส่วนสูงและน้ำหนักใช้เป็นค่าเริ่มต้นของตัวละคร การเก็บของเปลี่ยนเฉพาะค่าจำลอง เป้าหมายคือคืนสมดุล ไม่ใช่ผอมที่สุด</p><button onClick={() => setScreen('ready')}>เข้าใจแล้ว →</button>
+        <p className="lr-kicker">ก่อนออกวิ่ง</p><h1>เลือกให้พอดี ตอบให้เข้าใจ</h1><ol className="lr-tutorial"><li><strong>เลือกเลน</strong><p>กล้อง: เลื่อนไหล่ซ้าย–ขวาจากท่ากลาง · ปุ่ม: ← / → หรือ A / D เลื่อนทีละเลน · มือถือปัดซ้าย–ขวา กระโดดเก็บสัญลักษณ์ออกกำลังกาย: กล้องกระโดดเบา ๆ · ปุ่ม Space / ↑ · มือถือปัดขึ้น · กระโดดข้ามอาหารบนพื้นโดยไม่เก็บ</p></li><li><strong>เลือกของให้สมดุล</strong><p>อาหารดีลด BMI เล็กน้อย · ของออกกำลังกายลอยสูง ต้องกระโดดเก็บและลดมากกว่า · เก็บพลาดไม่เปลี่ยนค่า</p></li><li><strong>วิ่งเข้าประตูคำตอบ</strong><p>คำถามและคำตอบอยู่ด้านบน มีประตูแสดงคำตอบ เลือกเลนในช่วง 6 วินาทีก่อนถึงประตู เกมวิ่งต่อและล็อกคำตอบเมื่อผ่านประตู</p></li><li><strong>ผิดติดกัน 3 ข้อจบรอบ</strong><p>ตอบถูกรีเซ็ตการผิดติดกัน ประตูคำถามข้อ 10 คือเส้นชัย จบแล้วทบทวนเหตุผลได้ทั้งเมื่อแพ้และถึงเส้นชัย</p></li></ol><Practice mode={mode} cameraReady={cameraReady} detectedLane={detectedLane} /><p className="lr-muted">BMI จากส่วนสูงและน้ำหนักใช้เป็นค่าเริ่มต้นของตัวละคร การเก็บของเปลี่ยนเฉพาะค่าจำลอง เป้าหมายคือคืนสมดุล ไม่ใช่ผอมที่สุด</p><button onClick={() => setScreen('ready')}>เข้าใจแล้ว →</button>
       </>}
       {result && <>
-        <p className="lr-kicker">{s.record.demo ? 'ผลชุดทดลอง / แยกจาก analytics จริง' : 'ผลรอบนี้'}</p><h1>{s.record.outcome === 'completed' ? 'ถึงเส้นชัยแล้ว!' : 'มาลองทบทวนกัน'}</h1>
+        <p className="lr-kicker">ผลรอบนี้</p><h1>{s.record.outcome === 'completed' ? 'ถึงเส้นชัยแล้ว!' : 'มาลองทบทวนกัน'}</h1>
         <p>{s.record.outcome === 'game_over' ? 'Game Over · ตอบผิดติดกัน 3 ข้อ' : s.record.outcome === 'completed' ? 'จบภารกิจเมืองสมดุล' : 'ออกจากรอบก่อนจบ'}</p>
         <div className="lr-result-score"><strong>{s.record.score.toLocaleString('th-TH')}</strong><span>คะแนนรอบนี้ · สูงสุด {highScore(data.runs, s.record).toLocaleString('th-TH')}</span></div>
+        {!sessionOnly && !storageError && <><p className="lr-cloud-status" role="status">{deliveryText(syncStatus, cloudRecordCount > 0)}{syncStatus === 'error' && <button className="lr-link" onClick={async () => { await repository.current.retryAnalytics(); void syncAnalytics(); }}>ลองส่งใหม่</button>}</p>
+          <FeedbackPanel key={s.record.runId} runId={s.record.runId} repository={repository.current} waitForSave={() => writeQueue.current} onChange={() => void syncAnalytics()} /></>}
+        {sessionOnly && <p className="lr-muted">เล่นได้เฉพาะครั้งนี้ · ยังบันทึกคะแนนและดาวถาวรไม่ได้</p>}
         <div className="lr-stat-row"><div><small>คำถามที่ตอบ</small><strong>{s.record.answers.length} / 10</strong><span>ยังไม่ถึง {s.record.unreachedCount} ข้อ</span></div><div><small>ตอบถูก</small><strong>{s.record.correctCount} / {s.record.answers.length}</strong><span>{s.record.answers.length ? Math.round(s.record.correctCount / s.record.answers.length * 100) + '%' : 'ยังไม่มีข้อมูล'}</span></div><div><small>สมดุลตามระยะที่เล่น</small><strong>{s.distance ? Math.round(s.balancedDistance / s.distance * 100) + '%' : '—'}</strong><span>ค่าจำลองสุดท้าย {Math.round(s.balance)}</span></div></div>
         {s.record.outcome === 'game_over' && <div className="lr-last-answer"><strong>เฉลยข้อสุดท้าย: {s.lastAnswer?.options.find(o => o.optionId === s.lastAnswer?.correctOptionId)?.text}</strong><p>{s.lastAnswer?.explanation}</p></div>}
         <div className="lr-bmi-result"><span>BMI จากข้อมูลก่อนเล่น <strong>{s.initialBmi.toFixed(1)}</strong></span><span>BMI ตัวละครเมื่อจบ <strong>{s.simulatedBmi.toFixed(1)} <small>(จำลอง)</small></strong></span><p>การเก็บ item เปลี่ยนตัวละคร ข้อมูลส่วนสูง น้ำหนัก และ BMI ของผู้เล่นยังคงเดิม</p></div><h2>ทบทวนคำตอบ</h2>{s.record.answers.map(a => <details className="lr-review" key={a.index}><summary><span className={a.isCorrect ? 'lr-correct' : 'lr-wrong'}>{a.isCorrect ? '✓' : '↻'}</span> {a.index + 1}. {a.prompt}</summary><p>เลือก: {a.options.find(o => o.optionId === a.selectedOptionId)?.text}</p><p>คำตอบ: <strong>{a.options.find(o => o.optionId === a.correctOptionId)?.text}</strong></p><p>{a.explanation}</p></details>)}
         {s.record.unreachedCount > 0 && <p className="lr-muted">อีก {s.record.unreachedCount} ข้อยังไม่ถึง ไม่ถูกนับว่าผิด</p>}
         <details><summary>ตัวเลือกของที่เก็บในรอบ</summary><p>{Object.entries(s.record.itemCounts).map(([key, value]) => `${ITEM_CATALOG[key as keyof typeof ITEM_CATALOG]?.name ?? key} ${value}`).join(' · ') || 'ยังไม่ได้เก็บ item'}</p></details>
-        {profile && <HealthSummary profile={profile} />}
-        <div className="lr-actions"><button onClick={backToReady}>เล่นอีกครั้ง →</button><button className="secondary" onClick={() => { sessionRef.current = null; setSnapshot(null); edit(profile ?? undefined); }}>แก้ไขข้อมูล</button><button className="secondary" onClick={() => { sessionRef.current = null; setScreen('analytics'); }}>ดูข้อมูลผู้ดูแล</button></div>
+        <div className="lr-actions"><button onClick={backToReady}>เล่นอีกครั้ง →</button><button className="secondary" onClick={() => { sessionRef.current = null; setSnapshot(null); edit(profile ?? undefined); }}>แก้ไขข้อมูล</button></div>
       </>}
-      {screen === 'analytics' && <AnalyticsPanel runs={data.runs} contentVersion={DEMO_BANK.contentVersion} onBack={() => setScreen(profile ? 'ready' : 'intro')} onImport={async value => { await writeQueue.current; await repository.current.importBank(value); await refresh(); setDemo(true); }} onClear={async () => { await writeQueue.current; await repository.current.clear();data.profiles.forEach(p=>tutorialMemory.current?.clear(p.playerId)); setData(emptyData); setProfile(null); setDemo(true); try { localStorage.removeItem('body-rush-active-player'); } catch {} }} />}
     </div></div>}
     </div>
-    {introOpen && <div className="lr-modal-shade"><section ref={modalRef} className="lr-welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title"><span className="lr-welcome-icon">✦</span><p className="lr-kicker">WELCOME TO FOOD FIT FUN</p><h2 id="welcome-title">พร้อมสนุกไปด้วยกันไหม?</h2><section><h3>Objective</h3><div>{OBJECTIVE_COPY.map(text => <p key={text}>{text}</p>)}</div></section><label className="lr-checkbox"><input type="checkbox" checked={introChecked} onChange={e => setIntroChecked(e.target.checked)} />อ่าน Objective แล้ว</label><button disabled={!introChecked} onClick={() => { audio.current?.cue('confirm'); setIntroOpen(false); }}>OK · ไปกันเลย →</button></section></div>}
+    {introOpen && <div className="lr-modal-shade"><section ref={modalRef} className="lr-welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title"><span className="lr-welcome-icon">✦</span><p className="lr-kicker">WELCOME TO FOOD FIT FUN</p><h2 id="welcome-title">พร้อมสนุกไปด้วยกันไหม?</h2><section><h3>Objective</h3><div>{OBJECTIVE_COPY.map(text => <p key={text}>{text}</p>)}</div></section><p className="lr-data-notice">เมื่อเปิดใช้การส่งข้อมูล ชื่อเล่น เพศ อายุ BMI เริ่มต้น BMI จำลองตอนจบ คะแนนตอบคำถาม คะแนนเกม และดาวความสนุกจะส่งไปเก็บที่ Supabase เพื่อวิเคราะห์รวมหลายเครื่อง ภาพกล้อง ส่วนสูง น้ำหนัก และคำตอบรายข้อเก็บอยู่ในเครื่อง</p><label className="lr-checkbox"><input type="checkbox" checked={introChecked} onChange={e => setIntroChecked(e.target.checked)} />อ่าน Objective แล้ว</label><button disabled={!introChecked} onClick={() => { audio.current?.cue('confirm'); setIntroOpen(false); }}>OK · ไปกันเลย →</button></section></div>}
     {settingsOpen && <div className="lr-modal-shade"><section ref={modalRef} className="lr-settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><p className="lr-kicker">ปรับก่อนออกวิ่ง</p><h2 id="settings-title">SETTINGS</h2>
       <div className="lr-mode"><button className={mode === 'camera' ? 'selected secondary' : 'secondary'} aria-pressed={mode === 'camera'} onClick={() => chooseMode('camera')}><strong>◎ กล้อง</strong><small>ขยับไหล่ซ้าย–ขวา</small></button><button className={mode === 'manual' ? 'selected secondary' : 'secondary'} aria-pressed={mode === 'manual'} onClick={() => chooseMode('manual')}><strong>⌨ คีย์บอร์ด / ปัดจอ</strong><small>← / → หรือ A / D · มือถือปัดซ้าย–ขวา</small></button></div>
       {mode === 'camera' && <div className="lr-camera-setup"><p>{cameraStatus}</p><button className="secondary" onClick={beginCamera}>เปิด / ตั้งกล้อง</button><p className="lr-muted">ยืนนิ่งให้เห็นไหล่ถึงเอว ภาพประมวลผลในเครื่อง</p></div>}
       <div className="lr-quality"><span>คุณภาพภาพ</span>{(['low','medium','high'] as const).map((v,i) => <button className="secondary" aria-pressed={v === quality} key={v} onClick={() => setGraphics(v)}>{['เบา','กลาง','สูง'][i]}</button>)}</div>
       <fieldset className="lr-audio-settings"><legend>เสียงและเอฟเฟกต์</legend>{(['sfx','ambient'] as const).map(channel=><label key={channel}>{channel==='sfx' ? 'เสียงเอฟเฟกต์' : 'เสียงบรรยากาศ'} · {Math.round(audioPreferences[channel]*100)}%<input type="range" min="0" max="1" step="0.05" value={audioPreferences[channel]} onChange={e => { const next={...audioPreferences,[channel]:Number(e.target.value)};setAudioPreferences(next);if(!audio.current?.configure(next))setNotice('ตั้งค่าได้ในรอบนี้ แต่บันทึกลงเครื่องไม่ได้'); }} /></label>)}<div className="lr-actions"><button className="secondary" onClick={() => { const next={...audioPreferences,sfx:0,ambient:0};setAudioPreferences(next);audio.current?.configure(next); }}>ปิดเสียงทั้งหมด</button><button className="secondary" onClick={async () => { await audio.current?.unlock();audio.current?.cue('correct');if(!audio.current?.ready)setNotice('เบราว์เซอร์ยังไม่เปิดเสียง เล่นแบบเงียบได้'); }}>ลองเสียง</button></div><label className="lr-checkbox"><input type="checkbox" checked={audioPreferences.reducedMotion} onChange={e=>{const next={...audioPreferences,reducedMotion:e.target.checked};setAudioPreferences(next);audio.current?.configure(next);}} />ลดการเคลื่อนไหวของเอฟเฟกต์</label></fieldset>
       {profile && <button className="secondary" onClick={() => { forceTutorial.current=true;setSettingsOpen(false);requestPlay(profile); }}>ฝึกอีกครั้ง</button>}
-      <p>ชุดคำถาม: คำถามงานวิจัย · 25 ข้อสำหรับสุ่ม · เฉลยเสนอ รอผู้ดูแลตรวจ (พักข้อ 5)</p>
+      <p>ชุดคำถามงานวิจัย · สุ่ม 10 ข้อจาก 25 ข้อในแต่ละรอบ</p>
       {data.profiles.length > 0 && <label>ผู้เล่น<select value={profile?.playerId ?? ''} onChange={e => { const p = data.profiles.find(p => p.playerId === e.target.value); if (p) { setProfile(p); avatarRef.current = p.avatar; } }}><option value="">เลือกผู้เล่น</option>{data.profiles.map(p => <option key={p.playerId} value={p.playerId}>{p.nickname}</option>)}</select></label>}
-      <div className="lr-actions"><button className="secondary" onClick={() => { setSettingsOpen(false); edit(newProfile()); }}>＋ ผู้เล่นใหม่</button><button onClick={() => setSettingsOpen(false)}>เรียบร้อย ✓</button><button className="secondary" onClick={() => { setSettingsOpen(false); stopCamera(); setScreen('analytics'); }}>สำหรับผู้ดูแล / ข้อมูล</button></div>
+      <div className="lr-actions"><button className="secondary" onClick={() => { setSettingsOpen(false); edit(newProfile()); }}>＋ ผู้เล่นใหม่</button><button onClick={() => setSettingsOpen(false)}>เรียบร้อย ✓</button></div>
       {profile && <button className="lr-link" onClick={() => setDeletePlayer(true)}>ล้างข้อมูลผู้เล่นนี้</button>}
-      {deletePlayer && profile && <div className="lr-confirm"><p>ล้างโปรไฟล์ คะแนน และประวัติของ {profile.nickname}?</p><div className="lr-actions"><button onClick={async () => { await writeQueue.current; try { await repository.current.clear(profile.playerId);tutorialMemory.current?.clear(profile.playerId); await refresh(); setProfile(null); setDeletePlayer(false); } catch { setNotice('ล้างข้อมูลไม่สำเร็จ'); } }}>ยืนยันล้าง</button><button className="secondary" onClick={() => setDeletePlayer(false)}>ยกเลิก</button></div></div>}
+      {deletePlayer && profile && <div className="lr-confirm"><p>ล้างโปรไฟล์ คะแนน ประวัติ ดาว และคิวรอส่งของ {profile.nickname} ในเครื่องนี้? ข้อมูลที่ส่งส่วนกลางแล้วยังอยู่ และอาจถูกถามดาวใหม่</p><div className="lr-actions"><button onClick={async () => { await writeQueue.current; try { await repository.current.clear(profile.playerId);tutorialMemory.current?.clear(profile.playerId); await refresh(); setProfile(null); setDeletePlayer(false); } catch { setNotice('ล้างข้อมูลไม่สำเร็จ'); } }}>ยืนยันล้าง</button><button className="secondary" onClick={() => setDeletePlayer(false)}>ยกเลิก</button></div></div>}
     </section></div>}
   </main>;
 }

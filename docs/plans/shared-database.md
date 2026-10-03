@@ -2,13 +2,15 @@
 
 Status: BACKLOG — deferred by the user on 2026-10-03 (Asia/Bangkok).
 
-## Accepted current scope
+Update 2026-10-03: user resumed central run/answer/feedback analytics with Supabase; implementation is now local and awaits a Supabase project. See [feedback plan](feedback-supabase-analytics.md) and [setup](../setup/supabase-analytics.md). The historical local-only scope below is superseded for central analytics. Profile synchronization and cross-device player accounts remain backlog.
+
+## Historical accepted scope before resuming analytics
 
 Keep data local to each device/browser and separate players by playerId. The existing IndexedDB repository remains the local persistence implementation; localStorage holds preferences and the active player reference. No cloud synchronization, shared analytics, or cross-device history is being implemented now. The user described this as localstorage per player first.
 
 The shared database proposal below is future work. Provider, authentication and whether to synchronize player profiles remain undecided. Do not provision a database or deploy synchronization until that backlog is explicitly resumed.
 
-## Current behavior
+## Behavior before resuming analytics
 
 `RunRepository` writes profiles, runs, question exposure and settings to browser IndexedDB `body-rush-learning-v1`. Vercel serves the static build; there are no server API routes or remote database client. Another device, browser, or origin has its own database. Deploying does not upload those records.
 

@@ -1,6 +1,8 @@
 import type { DeckState, Profile, QuestionBank, RunRecord } from '../../game/learning/types';
 import { parseBank } from '../../game/learning/QuestionDeck';
 import { validateProfile } from '../health/assessment';
+import { ANALYTICS_STORES, upgradeAnalytics, queueTerminal, newSurvey, entry } from './AnalyticsStore';
+import { SURVEY_INTERVAL, SURVEY_VERSION, normalizeFeedbackComment, type AnalyticsIdentity, type SurveyState, type OutboxEntry } from './cloudContract';
 
 export interface StoredData { profiles: Profile[]; runs: RunRecord[]; bank: QuestionBank | null; }
 const DATABASE = 'body-rush-learning-v1';
@@ -14,18 +16,20 @@ function complete(tx: IDBTransaction): Promise<void> {
 /** All persistent writes resolve on transaction completion, never just request success. */
 export class RunRepository {
   private database: Promise<IDBDatabase> | null = null;
+  constructor(private databaseName = DATABASE) {}
   private open(): Promise<IDBDatabase> {
     if (!this.database) this.database = new Promise((resolve, reject) => {
       if (!globalThis.indexedDB) { reject(new Error('อุปกรณ์นี้ไม่รองรับการบันทึก IndexedDB')); return; }
-      const req = indexedDB.open(DATABASE, 1);
+      const req = indexedDB.open(this.databaseName, 2);
       req.onupgradeneeded = () => {
         const db = req.result;
-        db.createObjectStore('profiles', { keyPath: 'playerId' });
-        db.createObjectStore('runs', { keyPath: 'runId' });
-        db.createObjectStore('decks', { keyPath: 'id' });
-        db.createObjectStore('settings');
+        if (!db.objectStoreNames.contains('profiles')) db.createObjectStore('profiles', { keyPath: 'playerId' });
+        if (!db.objectStoreNames.contains('runs')) db.createObjectStore('runs', { keyPath: 'runId' });
+        if (!db.objectStoreNames.contains('decks')) db.createObjectStore('decks', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings');
+        upgradeAnalytics(db);
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => { req.result.onversionchange = () => { req.result.close(); this.database = null; }; resolve(req.result); };
       req.onerror = () => { this.database = null; reject(req.error); };
       req.onblocked = () => { this.database = null; reject(new Error('ปิดแท็บเกมเก่าแล้วลองบันทึกใหม่')); };
     });
@@ -57,7 +61,7 @@ export class RunRepository {
   }
   async saveRun(record: RunRecord, displayedCount: number): Promise<void> {
     const snapshot = structuredClone(record);
-    const db = await this.open(); const tx = db.transaction(['runs', 'decks'], 'readwrite'); const done = complete(tx);
+    const db = await this.open(); const tx = db.transaction(['runs', 'decks', ...ANALYTICS_STORES], 'readwrite'); const done = complete(tx);
     const store = tx.objectStore('runs');
     const priorReq = store.get(snapshot.runId);
     priorReq.onsuccess = () => {
@@ -65,6 +69,7 @@ export class RunRepository {
       // Late progress writes cannot undo a terminal record or remove already persisted answers.
       if (prior && ((prior.outcome !== 'in_progress' && snapshot.outcome === 'in_progress') || prior.answers.length > snapshot.answers.length)) return;
       store.put(snapshot);
+      queueTerminal(tx, snapshot, prior);
       const id = `${snapshot.playerId}:${snapshot.contentVersion}`;
       const req = tx.objectStore('decks').get(id);
       req.onsuccess = () => {
@@ -93,15 +98,64 @@ export class RunRepository {
     tx.objectStore('settings').put(bank, 'bank'); await done; return bank;
   }
   async clear(playerId?: string): Promise<void> {
-    const db = await this.open(); const tx = db.transaction(['profiles', 'runs', 'decks', 'settings'], 'readwrite'); const done = complete(tx);
-    if (!playerId) ['profiles', 'runs', 'decks', 'settings'].forEach(name => tx.objectStore(name).clear());
+    const db = await this.open(); const tx = db.transaction(['profiles', 'runs', 'decks', 'settings', ...ANALYTICS_STORES], 'readwrite'); const done = complete(tx);
+    if (!playerId) ['profiles', 'runs', 'decks', 'settings', ...ANALYTICS_STORES].forEach(name => tx.objectStore(name).clear());
     else {
       tx.objectStore('profiles').delete(playerId);
-      for (const name of ['runs', 'decks']) {
+      for (const name of ['runs', 'decks', ...ANALYTICS_STORES]) {
         const cursor = tx.objectStore(name).openCursor();
         cursor.onsuccess = () => { const c = cursor.result; if (!c) return; if (c.value.playerId === playerId) c.delete(); c.continue(); };
       }
     }
+    await done;
+  }
+
+  /** Opening/reloading the same result cannot double-count an impression. */
+  async prepareSurvey(runId: string): Promise<{ visible: boolean; state: SurveyState }> {
+    const db = await this.open(), tx = db.transaction(['runs', 'surveys', 'outbox'], 'readwrite'), done = complete(tx);
+    const run = await request<RunRecord | undefined>(tx.objectStore('runs').get(runId));
+    if (!run) { await done; throw new Error('รอบนี้ยังบันทึกไม่สำเร็จ กรุณาบันทึกผลก่อน'); }
+    const store = tx.objectStore('surveys');
+    const state = await request<SurveyState | undefined>(store.get(run.playerId)) ?? newSurvey(run.playerId);
+    const visible = !state.submitted && ['completed', 'game_over'].includes(run.outcome) && state.eligibleCount >= state.nextAsk;
+    if (visible && state.shownRunId !== runId) { state.shownRunId = runId; store.put(state); }
+    await done; return { visible, state };
+  }
+
+  async answerSurvey(runId: string, rating: number | null, comment?: string): Promise<void> {
+    if (rating !== null && (!Number.isInteger(rating) || rating < 1 || rating > 5)) throw new Error('เลือกดาว 1–5');
+    const normalizedComment = rating === null ? undefined : normalizeFeedbackComment(comment);
+    const db = await this.open(), tx = db.transaction(['runs', 'surveys', 'outbox'], 'readwrite'), done = complete(tx);
+    const run = await request<RunRecord | undefined>(tx.objectStore('runs').get(runId));
+    if (!run) { await done; throw new Error('ยังไม่มีผลรอบนี้ในเครื่อง'); }
+    const store = tx.objectStore('surveys'), state = await request<SurveyState | undefined>(store.get(run.playerId));
+    if (!state || state.submitted || state.shownRunId !== runId || state.eligibleCount < state.nextAsk) { await done; return; }
+    if (rating === null) { state.nextAsk = state.eligibleCount + SURVEY_INTERVAL; }
+    else {
+      state.submitted = true; state.rating = rating; state.comment = normalizedComment;
+      tx.objectStore('outbox').put(entry(`feedback:${run.playerId}`, run.playerId, { kind: 'feedback', contextRunId: runId,
+        surveyVersion: SURVEY_VERSION, rating, ...(normalizedComment ? { comment: normalizedComment } : {}), eligibleRunCount: state.eligibleCount, occurredAt: new Date().toISOString() }));
+    }
+    store.put(state); await done;
+  }
+
+  async analyticsData(): Promise<{ outbox: OutboxEntry[]; identities: AnalyticsIdentity[] }> {
+    const db = await this.open(), tx = db.transaction(['outbox', 'analyticsIdentities'], 'readonly'), done = complete(tx);
+    const [outbox, identities] = await Promise.all([request<OutboxEntry[]>(tx.objectStore('outbox').getAll()), request<AnalyticsIdentity[]>(tx.objectStore('analyticsIdentities').getAll())]);
+    await done; return { outbox, identities };
+  }
+
+  async updateDelivery(id: string, update: Pick<OutboxEntry, 'state' | 'attempts' | 'nextAttemptAt' | 'error'>): Promise<void> {
+    const db = await this.open(), tx = db.transaction('outbox', 'readwrite'), done = complete(tx), store = tx.objectStore('outbox');
+    const req = store.get(id);
+    req.onsuccess = () => { if (req.result && req.result.state !== 'synced') store.put({ ...req.result, ...update }); };
+    await done;
+  }
+
+  async retryAnalytics(): Promise<void> {
+    const db = await this.open(), tx = db.transaction('outbox', 'readwrite'), done = complete(tx);
+    const req = tx.objectStore('outbox').openCursor();
+    req.onsuccess = () => { const c = req.result; if (!c) return; if (c.value.state !== 'synced') c.update({ ...c.value, state: 'pending', nextAttemptAt: 0, error: undefined }); c.continue(); };
     await done;
   }
 }

@@ -47,6 +47,6 @@ export function AnalyticsPanel({ runs, contentVersion, onImport, onClear, onBack
     <p className="lr-muted">ตัวอย่างมี reviewStatus: draft ต้องตรวจคำถามและเปลี่ยนเป็น reviewed ก่อนใช้กับข้อมูลจริง ผลในเครื่องไม่รวมกับอุปกรณ์อื่นเอง</p>
     {error && <p className="lr-error" role="alert">{error}</p>}
     <hr /><div className="lr-actions"><button onClick={onBack}>กลับเมนู</button><button className="secondary danger" onClick={() => setConfirm(true)}>ล้างข้อมูลทั้งหมด</button></div>
-    {confirm && <div className="lr-confirm" role="alert"><p>ลบโปรไฟล์ ประวัติ คะแนน และคลังคำถามทั้งหมดบนเครื่องนี้? Export ก่อนล้างได้จากปุ่มด้านบน</p><div className="lr-actions"><button disabled={busy} onClick={async () => { setBusy(true); try { await onClear(); setConfirm(false); } catch { setError('ล้างข้อมูลไม่สำเร็จ'); } finally { setBusy(false); } }}>ยืนยันล้างข้อมูล</button><button className="secondary" onClick={() => setConfirm(false)}>ยกเลิก</button></div></div>}
+    {confirm && <div className="lr-confirm" role="alert"><p>ลบโปรไฟล์ ประวัติ คะแนน ดาว คิวรอส่ง และคลังคำถามทั้งหมดบนเครื่องนี้? ข้อมูลที่ส่งส่วนกลางแล้วยังอยู่ และผู้เล่นอาจถูกถามดาวใหม่ Export คะแนนและคำตอบก่อนล้างได้จากปุ่มด้านบน</p><div className="lr-actions"><button disabled={busy} onClick={async () => { setBusy(true); try { await onClear(); setConfirm(false); } catch { setError('ล้างข้อมูลไม่สำเร็จ'); } finally { setBusy(false); } }}>ยืนยันล้างข้อมูล</button><button className="secondary" onClick={() => setConfirm(false)}>ยกเลิก</button></div></div>}
   </>;
 }

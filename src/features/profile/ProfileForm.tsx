@@ -1,19 +1,9 @@
 import React, { useState } from 'react';
 import type { Profile } from '../../game/learning/types';
-import { assessProfile, BMI_SOURCE, EER_SOURCE, validateProfile } from '../health/assessment';
+import { validateProfile } from '../health/assessment';
 
 export const newProfile = (): Profile => ({ playerId: crypto.randomUUID(), nickname: '', version: 1, sex: 'male', ageMonths: 120, agePrecision: 'years', heightCm: 140, weightKg: 35, activity: '', avatar: 'mint' });
 export const demoProfile = (): Profile => ({ ...newProfile(), playerId: 'demo-player', nickname: 'ผู้เล่นทดลอง' });
-
-export function HealthSummary({ profile }: { profile: Profile }) {
-  const a = assessProfile(profile);
-  return <details className="lr-health"><summary>ข้อมูลก่อนเล่น · สำหรับผู้ดูแล</summary>
-    <div className="lr-stat-row"><div><small>BMI จากข้อมูลที่กรอก</small><strong>{a.bmi?.toFixed(1) ?? '—'}</strong><span>{a.category}</span></div>
-      <div><small>พลังงานประมาณต่อวัน</small><strong>{a.eer ? Math.round(a.eer).toLocaleString('th-TH') : '—'}</strong><span>kcal / วัน · {a.reason || 'ค่าประมาณ ไม่ใช่เป้าลดน้ำหนัก'}</span></div></div>
-    <p>ค่านี้ไม่ได้เปลี่ยนตามการเล่นเกม อ้างอิงช่วงวัยจากสหรัฐฯ และสมการพลังงาน DRI 2023 สำหรับอายุ 9–12 ปี เป็นข้อมูลประกอบสำหรับผู้ดูแล</p>
-    <a href={BMI_SOURCE} target="_blank" rel="noreferrer">ตารางอ้างอิง CDC</a> · <a href={EER_SOURCE} target="_blank" rel="noreferrer">สมการ Health Canada</a>
-  </details>;
-}
 
 export function ProfileForm({ initial, onSave, onCancel }: { initial: Profile; onSave: (p: Profile) => Promise<void>; onCancel: () => void }) {
   const [draft, setDraft] = useState({ ...initial, ageMonths: Math.floor(initial.ageMonths / 12) * 12, agePrecision: 'years' as const });

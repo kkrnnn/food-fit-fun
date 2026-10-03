@@ -49,10 +49,28 @@ describe('BMI game meter', () => {
   it('uses age and sex and handles missing references without a green fallback', () => {
     expect(bmiMeter({ ...year, sex: 'female' }, 20).gradient).not.toBe(bmiMeter(year, 20).gradient);
     expect(bmiMeter({ ...year, ageMonths: 20 }, 25).color).toBe('#8b849b');
-    const unsupported = bmiMeter({ ...year, ageMonths: 720 }, 25);
+    const unsupported = bmiMeter({ ...year, ageMonths: 12 }, 25);
     expect(unsupported.label).toBe('ยังไม่มีช่วงอ้างอิง');
-    for (const color of ['#e14860', '#edbd65', '#57bf99']) expect(unsupported.gradient).toContain(color);
+    expect(unsupported.gradient).not.toContain('#57bf99');
     expect(bmiMeter(year, NaN).color).toBe('#8b849b');
     expect(bmiMeter(year, 100).position).toBe(100);
+  });
+  it('covers every whole-year child age for both sexes without adult cutoffs', () => {
+    for (const sex of ['male','female'] as const) for (let years = 2; years < 20; years++) {
+      const meter = bmiMeter({ sex, ageMonths: years * 12, agePrecision: 'years' }, 18);
+      expect(meter.label).not.toBe('ยังไม่มีช่วงอ้างอิง');
+      expect(meter.referenceLabel).toContain('ปีเต็ม');
+    }
+    expect(bmiMeter({ ...year, ageMonths: 239, agePrecision: 'months' }, 25).referenceLabel).toContain('เดือน');
+    expect(bmiMeter({ ...year, ageMonths: 240 }, 25).referenceLabel).toContain('ผู้ใหญ่');
+  });
+  it('uses CDC adult equality boundaries consistently at ages 20 and 70 for both sexes', () => {
+    for (const sex of ['male','female'] as const) for (const years of [20,70]) {
+      const adult = { sex, ageMonths: years * 12, agePrecision: 'years' as const };
+      for (const [bmi, label] of [[18.49,'ต่ำกว่าช่วงอ้างอิง'],[18.5,'อยู่ในช่วงอ้างอิง'],[24.99,'อยู่ในช่วงอ้างอิง'],[25,'สูงกว่าช่วงอ้างอิง'],[29.99,'สูงกว่าช่วงอ้างอิง'],[30,'สูงกว่าช่วงอ้างอิงมาก']] as const) {
+        expect(bmiMeter(adult, bmi).label).toBe(label);
+      }
+      expect(assessProfile({ ...p, ...adult, heightCm: 100, weightKg: 25 }).category).toBe('สูงกว่าช่วงอ้างอิงผู้ใหญ่');
+    }
   });
 });
