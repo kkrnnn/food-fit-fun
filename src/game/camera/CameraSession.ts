@@ -1,4 +1,5 @@
 import type { PoseInput } from './PoseMapper';
+import { createVideoPoseDetector, type VideoPoseDetector, type VideoPoseDetectorFactory } from './VideoPoseDetector';
 
 export type CameraSessionPhase = 'off' | 'requesting' | 'loading' | 'active' | 'error';
 
@@ -27,8 +28,13 @@ export class CameraSession {
   private lastVideoTime = -1;
   private phase: CameraSessionPhase = 'off';
   private framesPaused = false;
+  private detector: VideoPoseDetector | null = null;
+  private loadingTimer: ReturnType<typeof setTimeout> | null = null;
+  private usingFallback = false;
+  private wasmUrl = '';
+  private modelUrl = '';
 
-  constructor(private readonly events: CameraSessionEvents) {}
+  constructor(private readonly events: CameraSessionEvents, private readonly createDetector: VideoPoseDetectorFactory = createVideoPoseDetector) {}
 
   get isActive(): boolean {
     return this.phase === 'active';
@@ -39,18 +45,14 @@ export class CameraSession {
     const generation = this.generation;
     this.video = video;
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-      this.fail('กล้องต้องเปิดบน localhost หรือ HTTPS');
-      return;
-    }
-    if (!window.Worker || !window.createImageBitmap) {
-      this.fail('เบราว์เซอร์นี้ไม่รองรับการประมวลผลกล้อง');
+      this.fail(window.isSecureContext ? 'เบราว์เซอร์นี้เปิดกล้องไม่ได้ ลองเปิดลิงก์ใน Safari หรือ Chrome โดยตรง แทนเบราว์เซอร์ใน LINE' : 'กล้องต้องเปิดบน localhost หรือ HTTPS');
       return;
     }
     this.setPhase('requesting', 'รออนุญาตใช้กล้อง');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } }
+        video: { facingMode: { ideal: 'user' }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } }
       });
       if (generation !== this.generation) {
         stream.getTracks().forEach(track => track.stop());
@@ -58,36 +60,49 @@ export class CameraSession {
       }
       this.stream = stream;
       stream.getVideoTracks()[0]?.addEventListener('ended', this.handleTrackEnded);
-      video.srcObject = stream;
       video.muted = true;
       video.playsInline = true;
+      video.autoplay = true;
+      video.setAttribute('playsinline', '');
+      video.setAttribute('webkit-playsinline', '');
+      video.srcObject = stream;
       await video.play();
       if (generation !== this.generation) return;
       this.setPhase('loading', 'กำลังโหลดตัวตรวจท่าทาง');
-      const worker = new Worker(new URL('./pose.worker.ts', import.meta.url), { type: 'module' });
-      this.worker = worker;
-      worker.onmessage = (event: MessageEvent<WorkerOutput>) => {
-        if (generation !== this.generation) return;
-        const message = event.data;
-        if (message.type === 'ready') {
-          this.setPhase('active');
-          this.scheduleFrames(generation);
-        } else if (message.type === 'pose') {
-          this.inFlight = false;
-          this.events.onPose(message.landmarks, message.timestampMs);
-        } else {
-          this.fail(`โหลดหรือตรวจท่าทางไม่สำเร็จ: ${message.message}`);
-        }
-      };
-      worker.onerror = () => {
-        if (generation === this.generation) this.fail('ตัวตรวจท่าทางหยุดทำงาน');
-      };
       const assetBase = new URL(import.meta.env.BASE_URL, window.location.origin);
-      worker.postMessage({
-        type: 'init',
-        wasmUrl: new URL('mediapipe/wasm', assetBase).href,
-        modelUrl: new URL('mediapipe/pose_landmarker_lite.task', assetBase).href
-      });
+      this.wasmUrl = new URL('mediapipe/wasm', assetBase).href;
+      this.modelUrl = new URL('mediapipe/pose_landmarker_lite.task', assetBase).href;
+      // MediaPipe worker canvas support varies on iPhone/iPad. Use its DOM canvas path there.
+      const appleMobile = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+      if (appleMobile || !window.Worker || !window.createImageBitmap || !window.OffscreenCanvas) {
+        await this.startFallback(generation);
+        return;
+      }
+      try {
+        const worker = new Worker(new URL('./pose.worker.ts', import.meta.url), { type: 'module' });
+        this.worker = worker;
+        this.loadingTimer = setTimeout(() => { void this.startFallback(generation); }, 15000);
+        worker.onmessage = (event: MessageEvent<WorkerOutput>) => {
+          if (generation !== this.generation || this.worker !== worker) return;
+          const message = event.data;
+          if (message.type === 'ready') {
+            this.clearLoadingTimer();
+            this.setPhase('active');
+            this.scheduleFrames(generation);
+          } else if (message.type === 'pose') {
+            this.inFlight = false;
+            this.events.onPose(message.landmarks, message.timestampMs);
+          } else {
+            void this.startFallback(generation);
+          }
+        };
+        worker.onerror = () => {
+          if (generation === this.generation && this.worker === worker) void this.startFallback(generation);
+        };
+        worker.postMessage({ type: 'init', wasmUrl: this.wasmUrl, modelUrl: this.modelUrl });
+      } catch {
+        await this.startFallback(generation);
+      }
     } catch (error) {
       if (generation !== this.generation) return;
       this.fail(this.describeMediaError(error));
@@ -104,6 +119,10 @@ export class CameraSession {
 
   stop(): void {
     this.generation++;
+    this.clearLoadingTimer();
+    this.detector?.close();
+    this.detector = null;
+    this.usingFallback = false;
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
     this.rafId = null;
     this.framesPaused = false;
@@ -130,23 +149,58 @@ export class CameraSession {
       this.rafId = requestAnimationFrame(loop);
       const video = this.video;
       if (!video || this.framesPaused || document.hidden || this.inFlight || video.readyState < 2) return;
-      if (nowMs - this.lastFrameMs < FRAME_INTERVAL_MS || video.currentTime === this.lastVideoTime) return;
+      if (nowMs - this.lastFrameMs < (this.detector ? 125 : FRAME_INTERVAL_MS) || video.currentTime === this.lastVideoTime) return;
       this.lastFrameMs = nowMs;
       this.lastVideoTime = video.currentTime;
+      if (this.detector) {
+        try { this.events.onPose(this.detector.detect(video,nowMs),nowMs); }
+        catch { this.fail('ตรวจท่าทางไม่สำเร็จ ลองเปิดกล้องใหม่ หรือใช้โหมดปัดจอ'); }
+        return;
+      }
+      const worker = this.worker;
       this.inFlight = true;
       void createImageBitmap(video).then(image => {
-        if (generation !== this.generation || this.phase !== 'active' || this.framesPaused || document.hidden) {
+        if (generation !== this.generation || this.worker !== worker || this.phase !== 'active' || this.framesPaused || document.hidden) {
           image.close();
-          this.inFlight = false;
+          if (generation === this.generation && this.worker === worker) this.inFlight = false;
           return;
         }
-        this.worker?.postMessage({ type: 'frame', image, timestampMs: nowMs }, [image]);
-      }).catch(error => {
-        this.inFlight = false;
-        if (generation === this.generation) this.fail(`อ่านภาพจากกล้องไม่สำเร็จ: ${String(error)}`);
+        worker?.postMessage({ type: 'frame', image, timestampMs: nowMs }, [image]);
+      }).catch(() => {
+        if (generation === this.generation && this.worker === worker) { this.inFlight = false; void this.startFallback(generation); }
       });
     };
     this.rafId = requestAnimationFrame(loop);
+  }
+
+  private clearLoadingTimer(): void {
+    if (this.loadingTimer !== null) clearTimeout(this.loadingTimer);
+    this.loadingTimer = null;
+  }
+
+  private async startFallback(generation: number): Promise<void> {
+    if (generation !== this.generation || this.usingFallback) return;
+    this.usingFallback = true;
+    this.clearLoadingTimer();
+    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
+    this.rafId = null;
+    this.worker?.terminate();
+    this.worker = null;
+    this.inFlight = false;
+    this.setPhase('loading', 'กำลังโหลดตัวตรวจท่าทางสำหรับอุปกรณ์นี้');
+    this.loadingTimer = setTimeout(() => {
+      if (generation === this.generation) this.fail('โหลดตัวตรวจท่าทางนานเกินไป ตรวจอินเทอร์เน็ตแล้วลองใหม่ หรือใช้โหมดปัดจอ');
+    }, 30000);
+    try {
+      const detector = await this.createDetector(this.wasmUrl,this.modelUrl);
+      if (generation !== this.generation) { detector.close(); return; }
+      this.clearLoadingTimer();
+      this.detector = detector;
+      this.setPhase('active');
+      this.scheduleFrames(generation);
+    } catch {
+      if (generation === this.generation) this.fail('เปิดกล้องได้ แต่โหลดตัวตรวจท่าทางไม่สำเร็จ ลองเปิดใน Safari หรือ Chrome โดยตรง หรือใช้โหมดปัดจอ');
+    }
   }
 
   private handleTrackEnded = () => {
@@ -166,7 +220,7 @@ export class CameraSession {
 
   private describeMediaError(error: unknown): string {
     if (error instanceof DOMException) {
-      if (error.name === 'NotAllowedError' || error.name === 'SecurityError') return 'ไม่ได้รับอนุญาตให้ใช้กล้อง';
+      if (error.name === 'NotAllowedError' || error.name === 'SecurityError') return 'ไม่ได้รับอนุญาตให้ใช้กล้อง ตรวจสิทธิ์กล้องของเว็บไซต์และเบราว์เซอร์ แล้วลองใหม่ หากเปิดผ่าน LINE ให้เปิดใน Safari หรือ Chrome';
       if (error.name === 'NotFoundError') return 'ไม่พบกล้องบนอุปกรณ์';
       if (error.name === 'NotReadableError') return 'กล้องอาจถูกแอปอื่นใช้งานอยู่';
     }

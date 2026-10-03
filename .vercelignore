@@ -1,0 +1,11 @@
+.git
+.agents
+.codex
+docs
+coverage
+node_modules
+dist
+AGENTS.md
+CONTEXT.md
+.env
+.env.*

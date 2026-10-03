@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="th">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Food Fit Fun — upright item QA</title>
+<style>
+  body {margin:0;background:#ddd7e9;font-family:system-ui} #scene {position:fixed;inset:0}
+  nav {position:fixed;left:12px;right:12px;bottom:12px;z-index:30;background:#ffffffe8;padding:12px;border-radius:18px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button {border:0;border-radius:12px;padding:12px;font:700 16px system-ui;background:#3d315c;color:white} label {font-size:14px}
+  header {position:fixed;top:12px;left:12px;z-index:30;background:#ffffffe8;padding:12px;border-radius:12px;font-weight:700}
+</style>
+<div id="scene"></div><header>Food Fit Fun · โมเดลไอเทม · ยกหน้า 80°</header>
+<nav><button data-model="PIZZA">พิซซ่า</button><button data-model="DONUT">โดนัท</button><button data-model="MEAL">มื้อสมดุล</button><button data-model="SHOES">รองเท้า</button></nav>
+<script type="module">
+  import { GameEngine3D } from '/src/game/three/GameEngine3D.ts';
+  import { RunSession } from '/src/game/learning/RunSession.ts';
+  import { DEMO_BANK, createQuestionSet } from '/src/game/learning/QuestionDeck.ts';
+  const engine=new GameEngine3D(document.querySelector('#scene'));
+  engine.setGraphicsQuality('low');
+  const questions=createQuestionSet(DEMO_BANK,120,{contentVersion:DEMO_BANK.contentVersion,counts:{}},42,true);
+  const run=new RunSession({playerId:'visual-qa',nickname:'QA',version:1,sex:'male',ageMonths:120,heightCm:140,weightKg:35,activity:'',avatar:'mint'},questions,{runId:'visual-only',startedAt:new Date().toISOString(),seed:42,demo:true,mode:'manual',contentVersion:DEMO_BANK.contentVersion,blueprintVersion:DEMO_BANK.blueprintVersion});
+  run.pause();
+  let selected="PIZZA";
+  let last=performance.now();
+  function render(now){engine.renderLearning(run.snapshot(),[{id:selected,type:selected,lane:0,distance:6}],Math.min(.1,(now-last)/1000),'mint');last=now;requestAnimationFrame(render);}
+  requestAnimationFrame(render);
+  document.querySelectorAll('button').forEach(button=>button.addEventListener('click',()=>{selected=button.dataset.model;}));
+  addEventListener('pagehide',()=>engine.destroy(),{once:true});
+</script>
+</html>

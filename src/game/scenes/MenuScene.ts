@@ -28,7 +28,7 @@ export class MenuScene extends Phaser.Scene {
     }
 
     // Title Marquee 3D Candy Text
-    const titleText = this.add.text(width / 2, 75, 'BODY RUSH', {
+    const titleText = this.add.text(width / 2, 75, 'FOOD FIT FUN', {
       font: 'bold 64px "Press Start 2P", monospace',
       color: '#db2777'
     }).setOrigin(0.5);

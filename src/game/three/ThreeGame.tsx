@@ -726,7 +726,7 @@ export const ThreeGame: React.FC = () => {
           <div className="br-menu-shell">
             <header className="br-hero">
               <div className="br-eyebrow"><span className="br-live-dot" /> ARCADE RUNNER <span>•</span> BODY BALANCE LAB</div>
-              <h1><span>BODY</span> RUSH <sup>3D</sup></h1>
+              <h1><span>FOOD</span> FIT FUN <sup>3D</sup></h1>
               <p>วิ่งให้ไกล เลือกให้สมดุล แล้วดูแลร่างกายระหว่างทาง</p>
             </header>
 

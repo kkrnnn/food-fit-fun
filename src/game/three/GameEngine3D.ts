@@ -1,7 +1,12 @@
+import { pickupFeedback } from '../learning/PickupFeedback';
+import { ITEM_CATALOG, isExercise, type ItemType as LearningItemType } from '../learning/ItemCatalog';
 import * as THREE from 'three';
+import { runnerPose } from './RunnerPose';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { BodyStatus, BreakfastOption, ItemType, ActiveCombo, DecisionDoor } from '../types';
 import { soundSynth } from '../audio/SoundSynth';
+import type { SceneItem, Snapshot } from '../learning/types';
+import { COURSE_SPEED, QUIZ_APPROACH_DISTANCE } from '../learning/RunSession';
 
 export type GraphicsQuality = 'low' | 'medium' | 'high';
 
@@ -30,7 +35,7 @@ export class GameEngine3D {
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
   public renderer: THREE.WebGLRenderer;
-  private clock: THREE.Clock;
+  private timer: THREE.Timer;
   private container: HTMLDivElement;
 
   public laneX: number[] = [-3.6, 0, 3.6];
@@ -105,6 +110,8 @@ export class GameEngine3D {
   private particlesMesh!: THREE.Points;
   private particlePositions!: Float32Array;
   private spawnTimer: number = 0;
+  private learningEntities = new Map<string, Entity3D>();
+  private learningPrepared = false;
   private nextGateDistance: number = 1000;
 
   private roadMesh!: THREE.Mesh;
@@ -140,7 +147,8 @@ export class GameEngine3D {
     this.container = container;
     container.innerHTML = '';
 
-    this.clock = new THREE.Clock();
+    this.timer = new THREE.Timer();
+    this.timer.connect(document);
     this.scene = new THREE.Scene();
 
     // A softer sunset sky keeps the road readable and lets props carry the bright colors.
@@ -162,7 +170,7 @@ export class GameEngine3D {
     this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -576,165 +584,81 @@ export class GameEngine3D {
   // --- 5. DETAILED POLISHED 3D PLAYER MODEL ---
   private build3DPlayer() {
     this.playerMesh = new THREE.Group();
-
-    // 1. ATHLETIC HOODIE / TORSO
-    this.playerTorso = new THREE.Mesh(
-      new RoundedBoxGeometry(1.2, 1.25, 0.72, 5, 0.16),
-      new THREE.MeshPhysicalMaterial({ color: 0x0284c7, roughness: 0.36, clearcoat: 0.35 })
-    );
-    this.playerTorso.position.y = 1.45;
-    this.playerTorso.castShadow = true;
+    const skin = new THREE.MeshStandardMaterial({ color: 0xf6c7a3, roughness: .62 });
+    const cream = new THREE.MeshStandardMaterial({ color: 0xfff5dd, roughness: .65 });
+    const navy = new THREE.MeshStandardMaterial({ color: 0x35365c, roughness: .75 });
+    const hair = new THREE.MeshStandardMaterial({ color: 0x38283f, roughness: .7 });
+    const coral = new THREE.MeshStandardMaterial({ color: 0xf57987, roughness: .48 });
+    const ball = (parent: THREE.Object3D, material: THREE.Material, x: number, y: number, z: number, sx: number, sy: number, sz: number) => {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), material);
+      mesh.position.set(x, y, z); mesh.scale.set(sx, sy, sz); mesh.castShadow = true; parent.add(mesh); return mesh;
+    };
+    // Sculpted pear-shaped sports jersey, with a continuous curved silhouette.
+    const profile = [[.25,0],[.41,.06],[.49,.24],[.48,.46],[.44,.68],[.48,.86],[.4,1.02],[.23,1.08]].map(([x,y]) => new THREE.Vector2(x,y));
+    this.playerTorso = new THREE.Mesh(new THREE.LatheGeometry(profile, 32), new THREE.MeshStandardMaterial({ color: 0x32bfa7, roughness: .65 }));
+    this.playerTorso.position.y = 1.02; this.playerTorso.scale.z = .8;
     this.playerMesh.add(this.playerTorso);
-
-    const zipper = new THREE.Mesh(
-      new RoundedBoxGeometry(0.045, 0.92, 0.035, 3, 0.015),
-      new THREE.MeshStandardMaterial({ color: 0xf6f4ff, roughness: 0.48 })
-    );
-    zipper.position.set(0, 1.47, -0.37);
-    this.playerMesh.add(zipper);
-
-    const chestPanel = new THREE.Mesh(
-      new RoundedBoxGeometry(0.42, 0.31, 0.04, 3, 0.018),
-      new THREE.MeshStandardMaterial({ color: 0x1e3a5f, roughness: 0.52 })
-    );
-    chestPanel.position.set(0.3, 1.62, -0.39);
-    this.playerMesh.add(chestPanel);
-    const chestMark = new THREE.Mesh(new THREE.TorusGeometry(0.095, 0.018, 6, 18), new THREE.MeshStandardMaterial({ color: 0xfde68a, metalness: 0.35, roughness: 0.35 }));
-    chestMark.position.set(0.3, 1.63, -0.42);
-    this.playerMesh.add(chestMark);
-
-    // 2. CANDY RUNNER BACKPACK
-    this.playerBackpack = new THREE.Mesh(
-      new RoundedBoxGeometry(0.82, 0.9, 0.42, 5, 0.14),
-      new THREE.MeshPhysicalMaterial({ color: 0xf43f5e, roughness: 0.34, clearcoat: 0.5 })
-    );
-    this.playerBackpack.position.set(0, 1.45, 0.52);
-    this.playerBackpack.castShadow = true;
-    this.playerMesh.add(this.playerBackpack);
-
-    const backpackPocket = new THREE.Mesh(new RoundedBoxGeometry(0.58, 0.38, 0.1, 4, 0.045), new THREE.MeshStandardMaterial({ color: 0x20314f, roughness: 0.46 }));
-    backpackPocket.position.set(0, 1.3, 0.78);
-    backpackPocket.castShadow = true;
-    this.playerMesh.add(backpackPocket);
-    const backpackZip = new THREE.Mesh(new RoundedBoxGeometry(0.29, 0.035, 0.025, 3, 0.01), new THREE.MeshStandardMaterial({ color: 0xf6d47a, metalness: 0.25, roughness: 0.3 }));
-    backpackZip.position.set(0, 1.31, 0.838);
-    this.playerMesh.add(backpackZip);
-
-    const buckle = new THREE.Mesh(
-      new RoundedBoxGeometry(0.24, 0.16, 0.06, 3, 0.03),
-      new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.55, roughness: 0.28 })
-    );
-    buckle.position.set(0, 1.45, 0.75);
-    this.playerMesh.add(buckle);
-
-    // 3. HEAD & FACE
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.58, 24, 24),
-      new THREE.MeshStandardMaterial({ color: 0xffdfba, roughness: 0.4 })
-    );
-    head.position.y = 2.45;
-    head.castShadow = true;
-    this.playerMesh.add(head);
-
-    const hairMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.5 });
-    const hairTop = new THREE.Mesh(new THREE.SphereGeometry(0.62, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55), hairMat);
-    hairTop.position.set(0, 2.52, 0);
-    this.playerMesh.add(hairTop);
-
-    for (let i = -2; i <= 2; i++) {
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.35, 8), hairMat);
-      spike.position.set(i * 0.16, 2.65, 0.28);
-      spike.rotation.x = 0.5;
-      this.playerMesh.add(spike);
+    // Small rounded day pack follows the jersey deformation as a child.
+    this.playerBackpack = ball(this.playerTorso, coral, 0,.58,.47,.3,.36,.19);
+    ball(this.playerBackpack, cream, 0,-.22,.88,.59,.27,.18);
+    ball(this.playerBackpack, navy, 0,.03,1,.16,.16,.08);
+    ball(this.playerTorso, navy, 0,.02,0,.42,.21,.45);
+    ball(this.playerMesh, skin, 0,2.12,0,.18,.22,.18);
+    const head = new THREE.Group(); head.position.set(0,2.57,0); this.playerMesh.add(head);
+    ball(head, skin, 0,0,-.03,.52,.57,.47);
+    ball(head, skin, -.49,-.02,0,.12,.17,.1); ball(head, skin,.49,-.02,0,.12,.17,.1);
+    // Rounded overlapping locks replace pointed spikes and a cylindrical head.
+    ball(head, hair, 0,.2,.08,.55,.44,.48);
+    for (const [x,y,z,rx] of [[-.35,.32,-.27,-.5],[-.13,.46,-.32,-.25],[.14,.43,-.34,.2],[.36,.25,-.23,.55]]) {
+      const lock = ball(head,hair,x,y,z,.23,.29,.2); lock.rotation.z = rx;
     }
-
-    this.playerHeadband = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.6, 0.6, 0.14, 24),
-      new THREE.MeshStandardMaterial({ color: 0x0ea5e9, roughness: 0.2 })
-    );
-    this.playerHeadband.position.y = 2.52;
-    this.playerMesh.add(this.playerHeadband);
-
-    const starEmblem = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, 0.12, 0.62),
-      new THREE.MeshStandardMaterial({ color: 0xfde047, metalness: 0.8 })
-    );
-    starEmblem.position.set(0, 2.52, -0.32);
-    this.playerMesh.add(starEmblem);
-
-    // 4. ARMS
-    const sleeveMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xffdfba });
-
-    this.leftArm = new THREE.Group();
-    const leftSleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.65, 16), sleeveMat);
-    leftSleeve.position.y = -0.32;
-    this.leftArm.add(leftSleeve);
-    const leftFist = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), skinMat);
-    leftFist.position.y = -0.72;
-    this.leftArm.add(leftFist);
-    this.leftArm.position.set(-0.72, 1.85, 0);
-    this.playerMesh.add(this.leftArm);
-
-    this.rightArm = new THREE.Group();
-    const rightSleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.65, 16), sleeveMat);
-    rightSleeve.position.y = -0.32;
-    this.rightArm.add(rightSleeve);
-    const rightFist = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), skinMat);
-    rightFist.position.y = -0.72;
-    this.rightArm.add(rightFist);
-    this.rightArm.position.set(0.72, 1.85, 0);
-    this.playerMesh.add(this.rightArm);
-
-    // 5. LEGS
-    const pantsMat = new THREE.MeshStandardMaterial({ color: 0x26324c, roughness: 0.62 });
-    const shoeWhiteMat = new THREE.MeshPhysicalMaterial({ color: 0xfff4e6, roughness: 0.36, clearcoat: 0.36 });
-    const shoeColorMat = new THREE.MeshPhysicalMaterial({ color: 0xec4899, roughness: 0.28, clearcoat: 0.65 });
-
-    this.leftLeg = new THREE.Group();
-    const leftThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.18, 0.6, 16), pantsMat);
-    leftThigh.position.y = -0.3;
-    this.leftLeg.add(leftThigh);
-    const leftCalf = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.15, 0.45, 16), pantsMat);
-    leftCalf.position.y = -0.65;
-    this.leftLeg.add(leftCalf);
-    const leftShoe = new THREE.Mesh(new RoundedBoxGeometry(0.4, 0.25, 0.68, 4, 0.1), shoeColorMat);
-    leftShoe.position.set(0, -0.92, -0.08);
-    this.leftLeg.add(leftShoe);
-    const leftSole = new THREE.Mesh(new RoundedBoxGeometry(0.41, 0.09, 0.7, 4, 0.035), shoeWhiteMat);
-    leftSole.position.set(0, -1.03, -0.08);
-    this.leftLeg.add(leftSole);
-    this.leftLeg.position.set(-0.35, 0.95, 0);
-    this.leftLeg.castShadow = true;
-    this.playerMesh.add(this.leftLeg);
-
-    this.rightLeg = new THREE.Group();
-    const rightThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.18, 0.6, 16), pantsMat);
-    rightThigh.position.y = -0.3;
-    this.rightLeg.add(rightThigh);
-    const rightCalf = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.15, 0.45, 16), pantsMat);
-    rightCalf.position.y = -0.65;
-    this.rightLeg.add(rightCalf);
-    const rightShoe = new THREE.Mesh(new RoundedBoxGeometry(0.4, 0.25, 0.68, 4, 0.1), shoeColorMat);
-    rightShoe.position.set(0, -0.92, -0.08);
-    this.rightLeg.add(rightShoe);
-    const rightSole = new THREE.Mesh(new RoundedBoxGeometry(0.41, 0.09, 0.7, 4, 0.035), shoeWhiteMat);
-    rightSole.position.set(0, -1.03, -0.08);
-    this.rightLeg.add(rightSole);
-    this.rightLeg.position.set(0.35, 0.95, 0);
-    this.rightLeg.castShadow = true;
-    this.playerMesh.add(this.rightLeg);
-
-    // 6. BLOB SHADOW
-    const shadowGeo = new THREE.CircleGeometry(0.95, 24);
-    const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4 });
-    this.playerShadow = new THREE.Mesh(shadowGeo, shadowMat);
-    this.playerShadow.rotation.x = -Math.PI / 2;
-    this.playerShadow.position.set(0, 0.025, 0.1);
-    this.scene.add(this.playerShadow);
-
-    this.playerMesh.position.set(0, 0, 0);
-    this.scene.add(this.playerMesh);
+    for (const x of [-.19,.19]) {
+      ball(head,cream,x,-.03,-.44,.1,.12,.035);
+      ball(head,navy,x,-.035,-.474,.047,.067,.018);
+      ball(head,cream,x-.012,-.01,-.489,.014,.02,.008);
+      ball(head,coral,x*1.5,-.18,-.405,.085,.045,.015);
+    }
+    ball(head,skin,0,-.12,-.48,.07,.085,.07);
+    const smile = new THREE.Mesh(new THREE.TorusGeometry(.1,.012,8,24,Math.PI), navy);
+    smile.rotation.z = Math.PI; smile.position.set(0,-.23,-.455); head.add(smile);
+    this.playerHeadband = new THREE.Mesh(new THREE.TorusGeometry(.54,.025,8,32,Math.PI), cream);
+    this.playerHeadband.rotation.x = -Math.PI/2; this.playerHeadband.position.y = .12; head.add(this.playerHeadband);
+    const capsule = (parent: THREE.Object3D, mat: THREE.Material, radius: number, length: number, y: number) => {
+      const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius,length,6,16),mat);
+      mesh.position.y = y; mesh.castShadow = true; parent.add(mesh); return mesh;
+    };
+    const arm = (side: number) => {
+      const group = new THREE.Group(); group.position.set(side*.55,1.94,0); group.rotation.z = side*.12;
+      capsule(group,cream,.17,.23,-.14);
+      const forearm = new THREE.Group(); forearm.position.y = -.37; forearm.rotation.x = .95;
+      capsule(forearm,skin,.115,.23,-.15); ball(forearm,skin,0,-.36,0,.14,.16,.13);
+      group.add(forearm); this.playerMesh.add(group); return group;
+    };
+    this.leftArm = arm(-1); this.rightArm = arm(1);
+    const leg = (side: number) => {
+      const group = new THREE.Group(); group.position.set(side*.25,1.04,0);
+      capsule(group,navy,.19,.28,-.19);
+      const knee = new THREE.Group(); knee.position.y = -.43;
+      capsule(knee,skin,.13,.26,-.19); capsule(knee,cream,.14,.12,-.38);
+      ball(knee,coral,0,-.55,-.12,.21,.15,.35);
+      ball(knee,cream,0,-.64,-.13,.22,.055,.36);
+      ball(knee,cream,0,-.53,-.33,.12,.035,.085);
+      group.add(knee); group.userData.knee = knee; this.playerMesh.add(group); return group;
+    };
+    this.leftLeg = leg(-1); this.rightLeg = leg(1);
+    // A single contact shadow avoids duplicated directional silhouettes and self-shadow artifacts.
+    this.playerMesh.traverse(obj => { if (obj instanceof THREE.Mesh) obj.castShadow = false; });
+    const shadowCanvas = document.createElement('canvas');
+    shadowCanvas.width = shadowCanvas.height = 64;
+    const context = shadowCanvas.getContext('2d')!;
+    const fade = context.createRadialGradient(32,32,3,32,32,32);
+    fade.addColorStop(0,'rgba(51,38,66,.28)');
+    fade.addColorStop(.45,'rgba(51,38,66,.16)');
+    fade.addColorStop(1,'rgba(51,38,66,0)');
+    context.fillStyle = fade; context.fillRect(0,0,64,64);
+    this.playerShadow = new THREE.Mesh(new THREE.PlaneGeometry(1.8,1.25),new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(shadowCanvas),transparent:true,depthWrite:false }));
+    this.playerShadow.rotation.x = -Math.PI/2; this.playerShadow.position.set(0,.035,0);
+    this.scene.add(this.playerShadow); this.scene.add(this.playerMesh);
   }
 
   public previewBreakfast(breakfast: BreakfastOption) {
@@ -880,7 +804,7 @@ export class GameEngine3D {
   }
 
   private getGateBannerTexture(door: DecisionDoor): THREE.CanvasTexture {
-    const key = `${door.type}_${door.title}`;
+    const key = `${door.type}_${door.id}_${door.title}_${door.statsEffect}`;
     if (this.gateTextureCache.has(key)) return this.gateTextureCache.get(key)!;
 
     const canvas = document.createElement('canvas');
@@ -889,7 +813,10 @@ export class GameEngine3D {
     const ctx = canvas.getContext('2d')!;
 
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    if (door.type === 'FAST_FOOD') {
+    if (door.statsEffect === 'FINISH') {
+      grad.addColorStop(0, '#d9982c');
+      grad.addColorStop(1, '#9c5920');
+    } else if (door.type === 'FAST_FOOD') {
       grad.addColorStop(0, '#ea580c');
       grad.addColorStop(1, '#9a3412');
     } else if (door.type === 'HEALTHY') {
@@ -911,12 +838,24 @@ export class GameEngine3D {
     ctx.fillStyle = '#ffffff';
     ctx.font = '900 46px "Chakra Petch", sans-serif';
     ctx.textAlign = 'center';
-    const icon = door.type === 'FAST_FOOD' ? '🍔 ' : door.type === 'HEALTHY' ? '🥗 ' : '✨ ';
-    ctx.fillText(icon + door.title, 256, 95);
+    if (door.id.startsWith('quiz-')) {
+      ctx.font = '700 36px "Chakra Petch", sans-serif';
+      const lines: string[] = [];
+      let line = '';
+      for (const char of door.title) {
+        if (ctx.measureText(line + char).width > 420) { lines.push(line); line = char; }
+        else line += char;
+      }
+      if (line) lines.push(line);
+      lines.slice(0, 3).forEach((text, i) => ctx.fillText(text, 256, 65 + i * 42));
+    } else {
+      const icon = door.type === 'FAST_FOOD' ? '🍔 ' : door.type === 'HEALTHY' ? '🥗 ' : '✨ ';
+      ctx.fillText(icon + door.title, 256, 95);
+    }
 
     ctx.fillStyle = '#fef08a';
     ctx.font = 'bold 32px "Chakra Petch", sans-serif';
-    ctx.fillText(door.statsEffect, 256, 175);
+    ctx.fillText(door.statsEffect, 256, door.id.startsWith('quiz-') ? 213 : 175);
 
     const tex = new THREE.CanvasTexture(canvas);
     this.gateTextureCache.set(key, tex);
@@ -970,6 +909,10 @@ export class GameEngine3D {
       itemMesh = this.createDetailedApple();
       itemMesh.position.y = 0.65;
       group.add(itemMesh);
+    } else if (type in ITEM_CATALOG && type !== 'WATER') {
+      itemMesh = this.createLearningFood(type as LearningItemType);
+      itemMesh.position.y = isExercise(type as LearningItemType) ? 3.8 : ['DONUT','PIZZA','MEAL'].includes(type) ? 1.25 : .7;
+      group.add(itemMesh);
     } else if (type === 'WATER') {
       itemMesh = this.createDetailedWater();
       itemMesh.position.y = 0.65;
@@ -982,6 +925,83 @@ export class GameEngine3D {
     const floatBaseY = itemMesh?.position.y ?? 0;
     const floatPhase = (Math.abs(z) + lane * 19) * 0.08;
     this.entities.push({ mesh: group, type, lane, z, altitude, doorInfo, itemMesh, floatBaseY, floatPhase });
+  }
+
+  private createLearningFood(type: LearningItemType): THREE.Group {
+    const group = new THREE.Group();
+    const model = new THREE.Group();
+    group.add(model);
+    let modelParent = model;
+    const mesh = (geometry: THREE.BufferGeometry, color: number, x = 0, y = 0, z = 0) => {
+      const object = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: .45 }));
+      object.position.set(x,y,z); modelParent.add(object); return object;
+    };
+    const color = ITEM_CATALOG[type].color;
+    if (type === 'DUMBBELL') {
+      mesh(new THREE.CylinderGeometry(.10,.10,1.4,12),0xd4dce9).rotation.z=Math.PI/2;
+      for(const x of [-.7,.7])mesh(new THREE.CylinderGeometry(.4,.4,.3,16),color,x).rotation.z=Math.PI/2;
+    } else if(type === 'SHOES') {
+      for(const x of [-.35,.35]) {
+        mesh(new RoundedBoxGeometry(.5,.45,1.2,3,.12),color,x);
+        mesh(new RoundedBoxGeometry(.54,.12,1.24,3,.05),0xffffff,x,-.25);
+        for(let i=0;i<3;i++)mesh(new RoundedBoxGeometry(.4,.05,.08,2,.02),0xffffff,x,.23,-.1+i*.18);
+      }
+    } else if(type === 'ROPE') {
+      mesh(new THREE.TorusGeometry(.7,.055,8,32),color);
+      for(const x of [-.6,.6])mesh(new THREE.CylinderGeometry(.12,.12,.5,12),0xffd166,x,-.5);
+    } else if (type === 'ORANGE') {
+      mesh(new THREE.SphereGeometry(.8,20,16),color);
+      const leaf = mesh(new THREE.SphereGeometry(.2,12,8),0x379854, .16,.82);leaf.scale.set(2,.25,1);
+    } else if (type === 'BANANA') {
+      const banana = mesh(new THREE.TorusGeometry(.85,.22,10,24,Math.PI * .85),color); banana.rotation.z = -.65;
+      mesh(new THREE.SphereGeometry(.16,8,8),0x725138, .85,0);
+    } else if (type === 'BROCCOLI') {
+      mesh(new THREE.CylinderGeometry(.18,.28,.85,12),0x8fbc62,0,-.15);
+      for (let i=0;i<5;i++) mesh(new THREE.SphereGeometry(.48,14,10),color,Math.cos(i*1.3)*.42,.52,Math.sin(i*1.3)*.35);
+    } else if (type === 'CARROT') {
+      const root=mesh(new THREE.ConeGeometry(.36,1.65,16),color);root.rotation.z=Math.PI;
+      for(let i=0;i<3;i++){ const leaf=mesh(new THREE.CylinderGeometry(.05,.1,.6,8),0x449c54,(i-1)*.15,1);leaf.rotation.z=(i-1)*.35; }
+    } else if (type === 'MILK') {
+      mesh(new RoundedBoxGeometry(.85,1.4,.7,2,.06),0xf2f6ff);
+      mesh(new THREE.CylinderGeometry(.17,.17,.13,12),0x659cdf,0,.78);
+      mesh(new RoundedBoxGeometry(.72,.4,.74,2,.04),0x87c7ef,0,-.1);
+    } else if (type === 'DONUT') {
+      mesh(new THREE.TorusGeometry(.6,.3,12,24),0xc58c4e).rotation.x=-Math.PI/2;
+      mesh(new THREE.TorusGeometry(.6,.18,10,24),color,0,.22).rotation.x=-Math.PI/2;
+      for(let i=0;i<10;i++) mesh(new THREE.SphereGeometry(.05,6,6),i%2?0xffdc62:0xffffff,Math.cos(i)*.6,.37,Math.sin(i)*.6);
+    } else if (type === 'PIZZA') {
+      const pizza=mesh(new THREE.CylinderGeometry(1,1,.18,3),color);pizza.rotation.y=Math.PI;
+      for(let i=0;i<3;i++)mesh(new THREE.CylinderGeometry(.15,.15,.05,12),0xd85946,(i-1)*.35,.12,(i%2)*.25);
+    } else {
+      mesh(new RoundedBoxGeometry(1.7,.25,1.2,2,.08),0xf4eee1,0,-.25);
+      mesh(new THREE.SphereGeometry(.45,14,10),0xffffff,-.4,.05).scale.y=.45;
+      mesh(new RoundedBoxGeometry(.55,.3,.5,2,.07),0xc79c65,.4,.05);
+      for(let i=0;i<3;i++)mesh(new THREE.SphereGeometry(.17,10,8),0x66b773,.3+i*.17,.12,-.35);
+    }
+    // Present horizontal top surfaces to the runner camera; keep exercise badges upright.
+    if (['DONUT','PIZZA','MEAL','SHOES'].includes(type)) {
+      model.rotation.x = THREE.MathUtils.degToRad(80);
+      model.scale.setScalar(1.15);
+    }
+    modelParent = group;
+    if(isExercise(type)) {
+      const ring=mesh(new THREE.TorusGeometry(1.2,.07,8,32),0x7df2de);ring.position.z=-.15;
+      mesh(new THREE.CylinderGeometry(.05,.05,.5,8),0xffffff,0,1.45);
+      mesh(new THREE.ConeGeometry(.18,.25,8),0xffffff,0,1.8);
+    }
+    return group;
+  }
+
+  public learningPickup(type: LearningItemType, reducedMotion: boolean) {
+    const feedback=pickupFeedback(type);
+    const position=new THREE.Vector3(this.playerMesh.position.x,1.5+this.playerMesh.position.y,0);
+    // A ring remains visible with reduced motion; no badge, tooltip or BMI text.
+    this.createBurstEffect(position,feedback.color,reducedMotion ? 0 : feedback.particles,1.05,true,feedback.kind==='caution',reducedMotion);
+    if(feedback.kind==='exercise')this.createBurstEffect(new THREE.Vector3(this.playerMesh.position.x,.2,0),0xffdc65,reducedMotion?0:14,.9,true,false,reducedMotion);
+  }
+
+  public learningEffect(correct: boolean, reducedMotion: boolean) {
+    if (!reducedMotion) this.createBurstEffect(new THREE.Vector3(this.playerMesh.position.x,1.2,0),correct?0x62edbf:0xffa66b,correct?24:12);
   }
 
   // --- 6. HIGH-END CANDY MODELS WITH RICH MATERIALS ---
@@ -1323,13 +1343,129 @@ export class GameEngine3D {
 
   public resume() {
     if (!this.isRunning || this.isGameOver || !this.paused) return;
-    this.clock.getDelta();
+    this.timer.reset();
     this.paused = false;
     try { soundSynth.startMusic('RUNNER'); } catch (e) {}
   }
 
   public setManualInputEnabled(enabled: boolean) {
     this.manualInputEnabled = enabled;
+  }
+
+  /** Rendering adapter only: RunSession owns distance, collision, quiz and score. */
+  public renderLearning(snapshot: Snapshot | null, items: SceneItem[], dt: number, avatar: 'mint' | 'rose' | 'amber') {
+    if (!this.learningPrepared) {
+      this.isRunning = false;
+      this.manualInputEnabled = false;
+      this.entities.forEach(e => this.disposeLearningEntity(e));
+      this.entities = [];
+      this.gatePortals.length = 0;
+      this.learningPrepared = true;
+    }
+    const moving = snapshot && !snapshot.paused && ['running','quiz_approach','quiz_feedback'].includes(snapshot.phase) && !snapshot.waitingForLane;
+    const speed = moving ? (snapshot?.motionSpeed ?? COURSE_SPEED) : 0;
+    // Preserve enough horizontal view for every lane on portrait screens.
+    const learningFov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(Math.PI / 6) * Math.max(1, 1.1 / this.camera.aspect)));
+    if (Math.abs(this.camera.fov - learningFov) > .01) { this.camera.fov = learningFov; this.camera.updateProjectionMatrix(); }
+    const lane = snapshot?.lane ?? 1;
+    this.currentLane = lane;
+    this.targetX = this.laneX[lane];
+    this.playerMesh.position.x = THREE.MathUtils.lerp(this.playerMesh.position.x, this.targetX, Math.min(1, dt * 12));
+    this.playerMesh.rotation.z = 0;
+    if (!snapshot) {
+      this.playerMesh.position.y = .09;
+      this.playerMesh.rotation.set(0,0,0);
+      this.leftArm.rotation.x = this.rightArm.rotation.x = 0;
+      this.leftLeg.rotation.x = this.rightLeg.rotation.x = 0;
+      (this.leftLeg.userData.knee as THREE.Group).rotation.x = 0;
+      (this.rightLeg.userData.knee as THREE.Group).rotation.x = 0;
+    }
+    if (snapshot && !moving) {
+      const settle=Math.min(1,dt*12);
+      this.playerMesh.position.y=THREE.MathUtils.lerp(this.playerMesh.position.y,.09,settle);
+      this.playerMesh.rotation.x=THREE.MathUtils.lerp(this.playerMesh.rotation.x,0,settle);
+      this.playerMesh.rotation.y=THREE.MathUtils.lerp(this.playerMesh.rotation.y,0,settle);
+      [this.leftArm,this.rightArm,this.leftLeg,this.rightLeg].forEach(part=>{part.rotation.x=THREE.MathUtils.lerp(part.rotation.x,0,settle);});
+      [this.leftLeg,this.rightLeg].forEach(part=>{const knee=part.userData.knee as THREE.Group;knee.rotation.x=THREE.MathUtils.lerp(knee.rotation.x,0,settle);});
+    }
+    const width = snapshot?.characterWidthScale ?? 1;
+    this.playerTorso.scale.x = THREE.MathUtils.lerp(this.playerTorso.scale.x, width, Math.min(1,dt*8));
+    this.playerTorso.scale.z = .8 * Math.sqrt(width);
+    this.leftArm.position.x = -(.48 * width + .07);
+    this.rightArm.position.x = .48 * width + .07;
+    this.leftLeg.position.x = -.25 * Math.sqrt(width);
+    this.rightLeg.position.x = .25 * Math.sqrt(width);
+    (this.playerTorso.material as THREE.MeshStandardMaterial).color.setHex(avatar === 'mint' ? 0x32bfa7 : avatar === 'rose' ? 0xf16e8b : 0xf5b64e);
+    this.playerShadow.position.x = this.playerMesh.position.x;
+    this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, this.targetX * .18, Math.min(1, dt * 8));
+    if (moving) {
+      this.runAnimTimer += dt * 10;
+      const pose = runnerPose(this.runAnimTimer);
+      this.playerMesh.position.y = pose.lift;
+      this.playerMesh.rotation.y = pose.twist;
+      this.playerMesh.rotation.x = -.04;
+      this.leftLeg.rotation.x = pose.leftHip;
+      this.rightLeg.rotation.x = pose.rightHip;
+      (this.leftLeg.userData.knee as THREE.Group).rotation.x = pose.leftKnee;
+      (this.rightLeg.userData.knee as THREE.Group).rotation.x = pose.rightKnee;
+      this.leftArm.rotation.x = pose.leftShoulder;
+      this.rightArm.rotation.x = pose.rightShoulder;
+      this.roadTexture.offset.y -= speed * dt * .1;
+      this.sceneryProps.forEach(prop => { prop.position.z += speed * dt; if (prop.position.z > 20) prop.position.z -= 260; });
+    }
+    if(snapshot?.jumpProgress !== undefined && moving) {
+      const lift=Math.sin(snapshot.jumpProgress*Math.PI);
+      this.playerMesh.position.y=.09+lift*1.8;
+      this.leftLeg.rotation.x=this.rightLeg.rotation.x=-.3*lift;
+      (this.leftLeg.userData.knee as THREE.Group).rotation.x=.7*lift;
+      (this.rightLeg.userData.knee as THREE.Group).rotation.x=.7*lift;
+      this.leftArm.rotation.x=this.rightArm.rotation.x=-.8*lift;
+      this.playerShadow.scale.setScalar(1+lift*.2);
+    } else this.playerShadow.scale.setScalar(1);
+    const wanted = new Map<string, { type: string; lane: number; z: number; door?: DecisionDoor }>();
+    if (snapshot) {
+      items.forEach(item => wanted.set(item.id, { type: item.type, lane: item.lane, z: -(item.distance - snapshot.distance) }));
+      if (snapshot.phase === 'quiz_approach') {
+        for (let i = 0; i < 3; i++) wanted.set(`gate-${snapshot.questionIndex}-${i}`, { type: snapshot.questionIndex === 9 ? 'DOOR_FINISH' : 'DOOR_QUIZ', lane: i,
+          z: -QUIZ_APPROACH_DISTANCE * (1 - snapshot.approachProgress), door: { id: `quiz-${i}`, title: snapshot.question?.options[i].text ?? '', subtitle: 'คำตอบ', type: 'MYSTERY', icon: '', statsEffect: snapshot.questionIndex === 9 ? 'FINISH' : '' } });
+      }
+    }
+    for (const [id, entity] of this.learningEntities) if (!wanted.has(id)) {
+      this.disposeLearningEntity(entity);
+      this.learningEntities.delete(id);
+    }
+    // Rebuild portal animation references from live entities only.
+    this.gatePortals.length = 0;
+    for (const [id, spec] of wanted) {
+      let entity = this.learningEntities.get(id);
+      if (!entity) {
+        this.spawn3DEntity(spec.type, spec.lane, spec.z, 0, spec.door);
+        entity = this.entities.pop()!;
+        this.learningEntities.set(id, entity);
+
+        if (id === 'finish') entity.mesh.scale.x = 2.6;
+      }
+      entity.z = spec.z;
+      entity.mesh.position.z = spec.z;
+      if (entity.itemMesh && !spec.door) {
+        // Gentle sway keeps recognizable faces visible instead of spinning them edge-on.
+        entity.itemMesh.rotation.y = Math.sin(this.runAnimTimer * .8 + (entity.floatPhase ?? 0)) * .18;
+      }
+    }
+    this.updateBurstEffects(dt);
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  private disposeLearningEntity(entity: Entity3D) {
+    this.scene.remove(entity.mesh);
+    entity.mesh.traverse(object => {
+      if (object instanceof THREE.Mesh) {
+        object.userData.ownedTexture?.dispose();
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach(material => material.dispose());
+      }
+    });
   }
 
   public setGraphicsQuality(quality: GraphicsQuality) {
@@ -1351,23 +1487,24 @@ export class GameEngine3D {
     this.feedbackEvent = { id: ++this.feedbackSequence, title, subtitle, kind };
   }
 
-  private createBurstEffect(position: THREE.Vector3, color: number, count = 14) {
+  private createBurstEffect(position: THREE.Vector3, color: number, count = 14, lifetime = .62, emphasis = false, warning = false, reduced = false) {
     const group = new THREE.Group();
     group.position.copy(position);
     const positions = new Float32Array(count * 3);
     const velocities: THREE.Vector3[] = [];
     for (let i = 0; i < count; i++) {
-      velocities.push(new THREE.Vector3((Math.random() - 0.5) * 7, 1.5 + Math.random() * 6, (Math.random() - 0.5) * 5));
+      velocities.push(new THREE.Vector3((Math.random() - 0.5) * 7, (warning ? .5 + Math.random() * 2 : 1.5 + Math.random() * 6), (Math.random() - 0.5) * 5));
     }
     const particleGeometry = new THREE.BufferGeometry();
     particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const particles = new THREE.Points(particleGeometry, new THREE.PointsMaterial({ color, size: 0.28, transparent: true, opacity: 0.95, sizeAttenuation: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const particles = new THREE.Points(particleGeometry, new THREE.PointsMaterial({ color, map: emphasis ? (this.particlesMesh.material as THREE.PointsMaterial).map : null, alphaTest: emphasis ? .04 : 0, size: emphasis ? .42 : .28, transparent: true, opacity: 0.95, sizeAttenuation: true, blending: emphasis ? THREE.NormalBlending : THREE.AdditiveBlending, depthWrite: false }));
     group.add(particles);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.74, 0.045, 8, 28), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false }));
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(emphasis ? 1.05 : .74, emphasis ? .1 : .045, 8, warning ? 6 : 28), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false }));
     ring.rotation.x = -Math.PI / 2;
     group.add(ring);
     this.scene.add(group);
-    this.burstEffects.push({ mesh: group, particles, ring, age: 0, lifetime: 0.62, velocities });
+    ring.userData.reduced=reduced;ring.userData.warning=warning;
+    this.burstEffects.push({ mesh: group, particles, ring, age: 0, lifetime, velocities });
     if (this.burstEffects.length > 8) {
       const oldest = this.burstEffects.shift()!;
       this.disposeBurst(oldest);
@@ -1399,7 +1536,7 @@ export class GameEngine3D {
       points.needsUpdate = true;
       (effect.particles.material as THREE.PointsMaterial).opacity = 1 - t;
       (effect.ring.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.82 * (1 - t));
-      effect.ring.scale.setScalar(0.55 + t * 1.8);
+      effect.ring.scale.setScalar(effect.ring.userData.reduced ? 1 : effect.ring.userData.warning ? 1.15 + Math.sin(t*Math.PI)*.25 : .55+t*1.8);
       if (t >= 1) {
         this.burstEffects.splice(i, 1);
         this.disposeBurst(effect);
@@ -1484,12 +1621,13 @@ export class GameEngine3D {
 
   // --- 3D GAME LOOP ---
   public update() {
-    const dt = Math.min(this.clock.getDelta(), 0.1);
+    this.timer.update();
+    const dt = Math.min(this.timer.getDelta(), 0.1);
     this.updateBiome(dt);
     this.updateBurstEffects(dt);
     for (const portal of this.gatePortals) {
       const material = portal.material as THREE.MeshBasicMaterial;
-      material.opacity = portal.userData.baseOpacity * (0.72 + Math.sin(this.clock.elapsedTime * 3.2) * 0.2);
+      material.opacity = portal.userData.baseOpacity * (0.72 + Math.sin(this.timer.getElapsed() * 3.2) * 0.2);
     }
 
     if (!this.isRunning || this.isGameOver || this.paused) {
@@ -1906,12 +2044,25 @@ export class GameEngine3D {
   };
 
   public destroy() {
+    this.timer.dispose();
+    (this.playerShadow.material as THREE.MeshBasicMaterial).map?.dispose();
     if (this.resizeTimeout !== null) clearTimeout(this.resizeTimeout);
     window.removeEventListener('resize', this.onWindowResize);
     window.removeEventListener('keydown', this.handleKeyDown);
     this.container.removeEventListener('touchstart', this.handleTouchStart);
     this.container.removeEventListener('touchend', this.handleTouchEnd);
     this.burstEffects.splice(0).forEach(effect => this.disposeBurst(effect));
+    this.scene.traverse(object => {
+      if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
+        object.userData.ownedTexture?.dispose();
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach(material => material.dispose());
+      }
+    });
+    this.gateTextureCache.forEach(texture => texture.dispose());
+    this.roadTexture?.dispose();
+    this.learningEntities.clear();
     if (this.renderer.domElement.parentElement) {
       this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);
     }

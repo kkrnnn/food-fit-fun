@@ -1,0 +1,527 @@
+{
+  "sourceFile": "คำถามงานวิจัย.docx",
+  "sourceSha256": "f43ef10f8b326888c1f63f47285049612b51ce2dde5628aefb6afdcc539a27d3",
+  "answerKeyInSource": false,
+  "questions": [
+    {
+      "sourceNumber": 1,
+      "prompt": "อาหารว่างชนิดใดเหมาะกับการกินเป็นประจำมากกว่า",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "ขนมถุงรสเค็ม"
+        },
+        {
+          "optionId": "b",
+          "text": "ผลไม้"
+        },
+        {
+          "optionId": "c",
+          "text": "ลูกอม"
+        }
+      ],
+      "proposedCorrectOptionId": "b",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 2,
+      "prompt": "อาหารเช้าข้อใดเหมาะสม",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "แฮมเบอร์เกอร์"
+        },
+        {
+          "optionId": "b",
+          "text": "ข้าวผัดถั่วหลากสี"
+        },
+        {
+          "optionId": "c",
+          "text": "แฮมไส้กรอก"
+        }
+      ],
+      "proposedCorrectOptionId": "b",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 3,
+      "prompt": "ควรกินแบบใดให้เหมาะสมกับร่างกาย",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "กินครบ 5 หมู่"
+        },
+        {
+          "optionId": "b",
+          "text": "กินอาหาร 2 มื้อ"
+        },
+        {
+          "optionId": "c",
+          "text": "กินขนมแทนอาหารหลัก"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 4,
+      "prompt": "ข้อใดเป็นกิจกรรมทางกายเพื่อสุขภาพที่ดี",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "เล่นกีฬา หรือเต้น"
+        },
+        {
+          "optionId": "b",
+          "text": "นั่งดูจอตลอดบ่าย"
+        },
+        {
+          "optionId": "c",
+          "text": "นอนเล่นบนโซฟา"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 5,
+      "prompt": "เด็กควรออกกำลังกายเฉลี่ยอย่างน้อยกี่วัน/สัปดาห์",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "2 วัน"
+        },
+        {
+          "optionId": "b",
+          "text": "3 วัน"
+        },
+        {
+          "optionId": "c",
+          "text": "4 วัน"
+        }
+      ],
+      "proposedCorrectOptionId": null,
+      "answerStatus": "needs_revision"
+    },
+    {
+      "sourceNumber": 6,
+      "prompt": "อาหารชนิดใดเป็นคาร์โบไฮเดต",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "ข้าว"
+        },
+        {
+          "optionId": "b",
+          "text": "ไข่"
+        },
+        {
+          "optionId": "c",
+          "text": "ปลา"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 7,
+      "prompt": "การกินอาหารหวานเพิ่มความเสี่ยงอะไร",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "น้ำหนักเกิน"
+        },
+        {
+          "optionId": "b",
+          "text": "ส่วนสูงเพิ่ม"
+        },
+        {
+          "optionId": "c",
+          "text": "สายตาดี"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 8,
+      "prompt": "อาหารใดเป็นแหล่งโปรตีนที่ดี",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "ลูกอม"
+        },
+        {
+          "optionId": "b",
+          "text": "น้ำอัดลม"
+        },
+        {
+          "optionId": "c",
+          "text": "ไข่ ปลา หรือเต้าหู้"
+        }
+      ],
+      "proposedCorrectOptionId": "c",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 9,
+      "prompt": "เมื่อรู้สึกกระหายน้ำ ควรเลือกดื่มอะไรดีที่สุด",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "น้ำเปล่า"
+        },
+        {
+          "optionId": "b",
+          "text": "น้ำอัดลม"
+        },
+        {
+          "optionId": "c",
+          "text": "น้ำหวาน"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 10,
+      "prompt": "อาหารทอดควรกินอย่างไร",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "ทุกมื้อ"
+        },
+        {
+          "optionId": "b",
+          "text": "กินแทนผัก"
+        },
+        {
+          "optionId": "c",
+          "text": "กินไม่บ่อย"
+        }
+      ],
+      "proposedCorrectOptionId": "c",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 11,
+      "prompt": "น้ำอัดลมส่วนใหญ่มักมีอะไรสูง",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "โปรตีน"
+        },
+        {
+          "optionId": "b",
+          "text": "ใยอาหาร"
+        },
+        {
+          "optionId": "c",
+          "text": "น้ำตาล"
+        }
+      ],
+      "proposedCorrectOptionId": "c",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 12,
+      "prompt": "อาหารใดมีใยอาหารมากกว่า",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "น้ำหวาน"
+        },
+        {
+          "optionId": "b",
+          "text": "ผักและผลไม้"
+        },
+        {
+          "optionId": "c",
+          "text": "ขนมหวาน"
+        }
+      ],
+      "proposedCorrectOptionId": "b",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 13,
+      "prompt": "อาหารข้อใดช่วยให้ได้รับแคลเซียม",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "น้ำอัดลม"
+        },
+        {
+          "optionId": "b",
+          "text": "ลูกอม"
+        },
+        {
+          "optionId": "c",
+          "text": "นมจืด"
+        }
+      ],
+      "proposedCorrectOptionId": "c",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 14,
+      "prompt": "ขนมหวานควรกินอย่างไร",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "กินได้ทุกมื้อ"
+        },
+        {
+          "optionId": "b",
+          "text": "กินแทนข้าวได้"
+        },
+        {
+          "optionId": "c",
+          "text": "กินเป็นครั้งคราวในปริมาณพอเหมาะ"
+        }
+      ],
+      "proposedCorrectOptionId": "c",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 15,
+      "prompt": "ก่อนกินอาหารควรทำอะไร",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "เล่นโทรศัพท์"
+        },
+        {
+          "optionId": "b",
+          "text": "ล้างมือให้สะอาด"
+        },
+        {
+          "optionId": "c",
+          "text": "วิ่งทันที"
+        }
+      ],
+      "proposedCorrectOptionId": "b",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 16,
+      "prompt": "ข้อใดเป็นกิจกรรมที่ทำให้หัวใจเต้นเร็วขึ้นมาก",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "วิ่ง"
+        },
+        {
+          "optionId": "b",
+          "text": "นั่งอ่านหนังสือ"
+        },
+        {
+          "optionId": "c",
+          "text": "นอนพัก"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 17,
+      "prompt": "กิจกรรมใดช่วยเสริมความแข็งแรงของกระดูก",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "ดูโทรทัศน์"
+        },
+        {
+          "optionId": "b",
+          "text": "เล่นเกม"
+        },
+        {
+          "optionId": "c",
+          "text": "กระโดดเชือก"
+        }
+      ],
+      "proposedCorrectOptionId": "c",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 18,
+      "prompt": "ข้อใดเป็นอาหารที่มีไขมันสูง",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "น้ำมันพืช"
+        },
+        {
+          "optionId": "b",
+          "text": "แตงกวา"
+        },
+        {
+          "optionId": "c",
+          "text": "ส้ม"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 19,
+      "prompt": "ข้อใดมีรสเค็ม",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "มันฝรั่งทอดรสเค็ม"
+        },
+        {
+          "optionId": "b",
+          "text": "แตงโม"
+        },
+        {
+          "optionId": "c",
+          "text": "กล้วย"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 20,
+      "prompt": "ข้อใดมีไขมันค่อนข้างสูง",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "ไก่ทอด"
+        },
+        {
+          "optionId": "b",
+          "text": "แตงโม"
+        },
+        {
+          "optionId": "c",
+          "text": "น้ำเปล่า"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 21,
+      "prompt": "ผลไม้ชนิดใดเป็นแหล่งวิตามินซี",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "ส้ม"
+        },
+        {
+          "optionId": "b",
+          "text": "น้ำอัดลม"
+        },
+        {
+          "optionId": "c",
+          "text": "มันฝรั่งทอด"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 22,
+      "prompt": "การวิ่งจัดเป็นกิจกรรมประเภทใด",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "กิจกรรมทางกาย"
+        },
+        {
+          "optionId": "b",
+          "text": "การพักผ่อน"
+        },
+        {
+          "optionId": "c",
+          "text": "การนอนหลับ"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 23,
+      "prompt": "การปั่นจักรยานเป็นกิจกรรมทางกายหรือไม่",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "ใช่"
+        },
+        {
+          "optionId": "b",
+          "text": "ไม่ใช่"
+        },
+        {
+          "optionId": "c",
+          "text": "เป็นการนอน"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 24,
+      "prompt": "ข้อใดเป็นกิจกรรมที่ใช้กล้ามเนื้อ",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "ปีนป่าย"
+        },
+        {
+          "optionId": "b",
+          "text": "นอน"
+        },
+        {
+          "optionId": "c",
+          "text": "นั่งดูการ์ตูน"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 25,
+      "prompt": "วิธีใดช่วยลดการกินน้ำตาลจากเครื่องดื่มได้",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "สั่งหวานน้อย"
+        },
+        {
+          "optionId": "b",
+          "text": "เพิ่มน้ำเชื่อม"
+        },
+        {
+          "optionId": "c",
+          "text": "เพิ่มครีมเทียม"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    },
+    {
+      "sourceNumber": 26,
+      "prompt": "ถ้าเพื่อนชวนเล่นเกมหน้าจอทั้งวัน เราควรทำอย่างไร",
+      "options": [
+        {
+          "optionId": "a",
+          "text": "แบ่งเวลาไปทำกิจกรรมทางกาย"
+        },
+        {
+          "optionId": "b",
+          "text": "เล่นต่อทั้งวัน"
+        },
+        {
+          "optionId": "c",
+          "text": "ไม่ต้องขยับตัว"
+        }
+      ],
+      "proposedCorrectOptionId": "a",
+      "answerStatus": "proposed_not_author_key"
+    }
+  ]
+}
