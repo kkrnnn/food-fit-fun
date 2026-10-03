@@ -84,7 +84,8 @@
 @media(max-width:600px) {.lr-balance {bottom:86px}.lr-item-feedback {bottom:250px}}
 
 /* Food Fit Fun branding and mobile gesture control. */
-.lr-game.lr-touch-run {touch-action:pan-y;user-select:none}
+/* Keep vertical swipes in the game; pan-y makes Android cancel jump gestures. */
+.lr-game.lr-touch-run {touch-action:none;user-select:none}
 .lr-game h1.lr-title-logo {font-size:clamp(52px,7vw,94px)}
 .lr-swipe-hint {display:none}
 @media(max-width:600px) {

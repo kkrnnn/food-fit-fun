@@ -402,7 +402,7 @@ export function LearningGame() {
   const result = screen === 'result' && s;
   const options = s?.question?.options ?? [];
 
-  return <main onClickCapture={() => { void audio.current?.unlock(); }} onPointerDownCapture={() => { void audio.current?.unlock(); }} onKeyDownCapture={() => { void audio.current?.unlock(); }} className={`lr-game ${mode === 'camera' ? 'lr-camera-mode' : ''} ${audioPreferences.reducedMotion ? 'lr-reduced-motion' : ''} ${inRun && mode === 'manual' ? 'lr-touch-run' : ''}`}
+  return <main onClickCapture={() => { void audio.current?.unlock(); }} onPointerDownCapture={() => { void audio.current?.unlock(); }} onKeyDownCapture={() => { void audio.current?.unlock(); }} className={`lr-game ${mode === 'camera' ? 'lr-camera-mode' : ''} ${audioPreferences.reducedMotion ? 'lr-reduced-motion' : ''} ${inRun && mode === 'manual' && (!s?.paused || inPractice) ? 'lr-touch-run' : ''}`}
     onPointerDown={event => {
       if (!event.isPrimary) { swipeStart.current = null; return; }
       if (!inRun || modeRef.current !== 'manual' || (event.pointerType === 'mouse' && event.button !== 0) ||
