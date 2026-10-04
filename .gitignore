@@ -1,6 +1,8 @@
 node_modules/
 dist/
 coverage/
+.vite/
+docs/
 .DS_Store
 .env
 .env.*
