@@ -1,6 +1,6 @@
 # Camera calibration / upper-target / performance verification
 
-2026-10-04 · branch `codex/camera-calibration-performance` · verified locally; user authorized commit, push and Vercel production release.
+2026-10-04 · branch `codex/camera-calibration-performance` · committed, pushed and released to Vercel production.
 
 ## Delivered behavior
 
@@ -44,4 +44,12 @@ The no-camera fixture did not reproduce the reported stutter. No speculative mes
 
 ## Remaining physical validation
 
-Real camera retest is required for different distances/lighting, comfortable zone reach, ten target touches and lane selections, command latency, and frame pacing while inference is running. Automated/synthetic tests do not establish 9/10 accuracy, 200 ms response time, 60 FPS with a live camera, or actual standing-distance legibility. Production delivery evidence will be recorded separately below after deployment completes.
+Real camera retest is required for different distances/lighting, comfortable zone reach, ten target touches and lane selections, command latency, and frame pacing while inference is running. Automated/synthetic tests do not establish 9/10 accuracy, 200 ms response time, 60 FPS with a live camera, or actual standing-distance legibility.
+
+## Production delivery
+
+- Feature commit `fdbd6ec292a4b2697818a5c023e33582dbb4fcd7` pushed to `origin/codex/camera-calibration-performance` through Fork's existing GitHub authentication. CLI HTTPS lacked a credential and the available SSH account lacked write permission; no credentials or remote URLs were changed.
+- [Vercel production deployment](https://vercel.com/dream-league1/food-fit-fun/J5jx18vjUR7m6RqEX26UADDsnjzW) reported `READY`, deployment `dpl_J5jx18vjUR7m6RqEX26UADDsnjzW`, aliased to [Food Fit Fun](https://food-fit-fun.vercel.app/).
+- Production home returned HTTP 200, serving `index-Do9b5XgL.js` and `index-BQUUyoFw.css`. The downloaded JS and local production build shared SHA-256 `81e146683c7f5ef7e50414657f0b984ac7ff9f16a0187fc9c21582187d6b219a`.
+- Live browser checked intro, menu and camera Settings with the head-to-waist guidance and sensitivity controls. No runtime errors were captured. The camera was not opened and no game results were submitted. Screenshot: `camera-calibration-vercel.jpg`.
+- The deployment was uploaded from the feature commit; release-evidence documentation is committed afterward and excluded from Vercel upload by `.vercelignore`.
