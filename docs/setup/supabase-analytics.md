@@ -2,7 +2,7 @@
 
 สถานะ 2026-10-04: ตารางข้อมูลเกมใน public มี `score` กับ `feedback`. Baseline version `20261003000100`, comment migration `20261003000200` และ migration เก็บ feedback ทุกรอบ `20261004000100` ลงทะเบียนใน `supabase_migrations.schema_migrations` ซึ่งเป็น metadata schema แยกจากข้อมูลเกม
 
-[Supabase project](https://supabase.com/dashboard/project/umsquyyfozhggogfnrak) · [เกม Food Fit Fun](https://food-fit-fun.vercel.app) · [Production deployment](https://vercel.com/dream-league1/food-fit-fun/6SrMX5xaU1L5W7Pcf3bnKriWdzwD)
+[Supabase project](https://supabase.com/dashboard/project/umsquyyfozhggogfnrak) · [เกม Food Fit Fun](https://food-fit-fun.vercel.app) · [Production deployment](https://vercel.com/dream-league1/food-fit-fun/6KR7iMfbaN4reZyFfN9j2uY1Ju97)
 
 ## สองตาราง
 

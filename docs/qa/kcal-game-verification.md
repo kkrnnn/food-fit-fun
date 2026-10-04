@@ -61,7 +61,9 @@ Applied migration `20261004000300_exercise_energy.sql` และลงทะเ�
 
 Regression `npm test -- src/game/three/PickupFollowing.test.ts --maxWorkers=2` เรียก learningPickup จริง เปลี่ยนตำแหน่ง runner แล้วเรียก frame updater จริง ก่อนแก้ล้มทั้ง 3 tests เพราะ burst.x ยังคง 0 เมื่อ runner.x เปลี่ยนเป็น ±2.4 หลังแก้ผ่านครบ รวมแนวตั้งและ reduced motion; full suite/build ผ่านตามจำนวนล่าสุดข้างต้น ตรวจเกมด้วยปุ่ม Right/Left และเห็นวงพร้อม `+80 kcal` อยู่ที่ตัวละครหลังย้ายกลับกลาง [ภาพล่าสุด](kcal-following-smaller.jpg)
 
-ผู้ใช้อนุมัติ commit, push และ deploy Vercel production ชัดเจนวันที่ 4 ตุลาคม 2026 ตรวจซ้ำ full suite 29 files / 156 tests, build และ diff check ผ่าน พร้อม migration บน live ก่อน deploy สถานะ release และหลักฐาน production จะบันทึกหลังยืนยัน Ready/alias/API และตรวจหน้าเว็บจริง
+ผู้ใช้อนุมัติ commit, push และ deploy Vercel production ชัดเจนวันที่ 4 ตุลาคม 2026 ตรวจซ้ำ full suite 29 files / 156 tests, build และ diff check ผ่าน พร้อม migration บน live ก่อน deploy
+
+Production รุ่นสุดท้ายจาก commit `dff59d5` (ต่อจาก feature `b88c3ad`) ขึ้น **Ready** และ alias [food-fit-fun.vercel.app](https://food-fit-fun.vercel.app) แล้ว [Deployment](https://vercel.com/dream-league1/food-fit-fun/6KR7iMfbaN4reZyFfN9j2uY1Ju97). `git ls-remote` ยืนยันทั้งสอง commits บน origin/master. GET `/api/analytics/runs` บนโดเมนจริงตอบ 200 พร้อม `enabled=true`, `runSchemaVersion=2`, `exerciseEnergyVersion=2`. Native Node smoke check ผ่านทั้ง runs/feedback entry points. Browser เปิดหน้า production หลัง deploy รอบแก้ไขได้ และแสดงประกาศข้อมูลพลังงานรุ่นใหม่ [ภาพ production](kcal-vercel-production.jpg). ไม่สร้างผลเล่นผู้ใช้ใหม่ระหว่าง release QA; Android เครื่องจริงและกล้องจริงยังต้องทดสอบแยก
 
 ### Native Node API regression
 
