@@ -1,0 +1,13 @@
+<!doctype html><html lang="th"><meta charset="UTF-8"><title>Food Fit Fun · ตรวจโมเดลอาหาร</title>
+<style>body{margin:0;background:#dce8dc;color:#39304f;font:18px sans-serif}header{position:absolute;top:25px;width:100%;text-align:center}footer{position:absolute;bottom:30px;width:100%;display:flex;justify-content:space-around;font-weight:bold}canvas{display:block}</style>
+<header>Food Fit Fun · โมเดลอาหารที่ปรับใหม่</header><footer><span>กล้วย · 1 ผล · 110 kcal</span><span>ข้าว + อกไก่ + บรอกโคลี · 394 kcal</span></footer>
+<script type="module">
+import * as THREE from '/node_modules/three/build/three.module.js';
+import { createCollectibleModel } from '/src/game/three/CollectibleModels.ts';
+const scene=new THREE.Scene();scene.background=new THREE.Color('#dce8dc');
+const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));document.body.append(renderer.domElement);
+const camera=new THREE.PerspectiveCamera(35,innerWidth/innerHeight,.1,100);camera.position.set(0,5.1,8);camera.lookAt(0,.6,0);
+scene.add(new THREE.HemisphereLight(0xffffff,0x8e9e82,2.5));const sun=new THREE.DirectionalLight(0xffffff,3);sun.position.set(-3,7,5);scene.add(sun);
+for(const [type,x] of [['BANANA',-1.75],['MEAL',1.75]]) {const model=createCollectibleModel(type);model.position.x=x;scene.add(model);}
+function render(){renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.render(scene,camera);}addEventListener('resize',render);render();
+</script></html>

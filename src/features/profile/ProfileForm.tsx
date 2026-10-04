@@ -20,8 +20,8 @@ export function ProfileForm({ initial, onSave, onCancel }: { initial: Profile; o
   }}>
     <p className="lr-kicker">LET’S PLAY / ผู้เล่น</p><h1>พร้อมออกวิ่งหรือยัง?</h1><p>ใส่ชื่อและอายุ แล้วไปผจญภัยกัน!</p>
     <div className="lr-form-grid">
-      <label className="lr-wide">ชื่อเล่น / รหัสผู้เล่น<input required maxLength={40} value={draft.nickname} onChange={e => change('nickname', e.target.value)} autoComplete="off" /></label>
-      <label>เพศที่ใช้กับสูตร<select value={draft.sex} onChange={e => change('sex', e.target.value as Profile['sex'])}><option value="male">ชาย</option><option value="female">หญิง</option></select></label>
+      <label className="lr-wide">ชื่อเล่น<input required maxLength={40} value={draft.nickname} onChange={e => change('nickname', e.target.value)} autoComplete="off" /></label>
+      <label>เพศ<select value={draft.sex} onChange={e => change('sex', e.target.value as Profile['sex'])}><option value="male">ชาย</option><option value="female">หญิง</option></select></label>
       <label>อายุ (ปี)<input type="number" required step={1} value={Number.isFinite(years) ? years : ''} onChange={e => change('ageMonths', e.target.valueAsNumber * 12)} /></label>
       <label>ส่วนสูง (cm)<input type="number" required min={80} max={220} step="0.1" value={Number.isFinite(draft.heightCm) ? draft.heightCm : ''} onChange={e => change('heightCm', e.target.valueAsNumber)} /></label>
       <label>น้ำหนัก (kg)<input type="number" required min={10} max={200} step="0.1" value={Number.isFinite(draft.weightKg) ? draft.weightKg : ''} onChange={e => change('weightKg', e.target.valueAsNumber)} /></label>

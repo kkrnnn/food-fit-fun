@@ -1,3 +1,5 @@
+import { netGameEnergy } from './ExerciseEnergy';
+import { FOOD_NUTRITION } from './FoodNutrition';
 import { RESEARCH_BANK } from './ResearchBank';
 import { jumpProgress } from './JumpArc';
 import type { Lane, SceneItem, Snapshot } from './types';
@@ -48,9 +50,10 @@ export class GuidedTutorial {
     snapshot.distance = this.distance; snapshot.lane = this.lane;
     snapshot.paused = this.phase === 'waiting' || this.speed === 0;
     snapshot.motionSpeed = this.speed; snapshot.jumpProgress=jumpProgress(this.jumpAge * 1000);
-    snapshot.balance = this.distance >= stops[2]+2 ? 4 : this.distance >= ends[1] ? 24 : 28;
-    snapshot.simulatedBmi = base.initialBmi * (1 + snapshot.balance * .0025);
-    snapshot.characterWidthScale = Math.max(.75, Math.min(1.5, snapshot.simulatedBmi / 18));
+    snapshot.foodIntakeKcal = this.distance >= ends[1] ? FOOD_NUTRITION.APPLE!.kcalPerPortion : 0;
+    snapshot.exerciseKcal = this.distance >= ends[2] ? base.record.exerciseEstimates?.SHOES?.kcalPerPickup ?? 0 : 0;
+    snapshot.netEnergyKcal = netGameEnergy(snapshot.foodIntakeKcal, snapshot.exerciseKcal, this.distance>=ends[2] && base.record.exerciseEnergyStatus==='unavailable');
+    snapshot.characterWidthScale = 1;
     snapshot.phase = stage === 'quiz' ? 'quiz_approach' : 'running';
     snapshot.questionIndex = 0;
     snapshot.approachProgress = 1 - Math.max(0, ends[3] - this.distance) / 96;

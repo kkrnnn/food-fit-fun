@@ -1,3 +1,4 @@
+import { estimateExerciseEnergy } from '../../game/learning/ExerciseEnergy';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { RunRepository } from './RunRepository';
@@ -31,7 +32,7 @@ describe('local survey and atomic delivery queue', () => {
     const received:unknown[]=[];
     const send=async(_url:RequestInfo|URL,init?:RequestInit)=>{
       if(init?.method)received.push(JSON.parse(String(init.body)));
-      return Response.json(init?.method?{ok:true}:{enabled:true});
+      return Response.json(init?.method?{ok:true}:{enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2});
     };
     const sync=new AnalyticsSync(reloaded,send);expect(await sync.flush()).toBe('synced');await sync.flush();
     expect(received.filter(p=>(p as {kind:string}).kind==='feedback')).toEqual([expect.objectContaining({rating:4,comment:'อยากได้อาหารเพิ่ม 🍎\nกระโดดสนุกดี'})]);
@@ -64,7 +65,7 @@ describe('local survey and atomic delivery queue', () => {
     const sent:string[]=[];
     const send=async(_url:RequestInfo|URL,init?:RequestInit)=>{
       if(init?.method)sent.push(JSON.parse(String(init.body)).kind);
-      return Response.json(init?.method?{ok:true}:{enabled:true});
+      return Response.json(init?.method?{ok:true}:{enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2});
     };
     expect(await new AnalyticsSync(repo,send).flush()).toBe('synced');
     expect(sent.filter(kind=>kind==='feedback')).toHaveLength(2);
@@ -100,25 +101,75 @@ describe('local survey and atomic delivery queue', () => {
     await expect(repo.answerSurvey(other.runId,0)).rejects.toThrow();
     await repo.clear(profile.playerId);const data=await repo.analyticsData();expect(data.identities.map(i=>i.playerId)).toEqual(['other']);expect(data.outbox).toHaveLength(1);
   });
-  it('sends only the requested score/profile/BMI snapshot, excluding answers and measurements', () => {
+  it('sends energy snapshots with null BMI, excluding answers and measurements', () => {
     const record=run();record.initialBmi=18;record.simulatedBmi=17;
     const payload={kind:'run',run:cloudRun(record)};
     expect(validatePayload({...payload,secret:'ignored'})).toEqual(payload);
-    expect(payload.run).toMatchObject({playerName:'PRIVATE NAME', sex:'male', ageYears:10, bmiStart:18, bmiEnd:17, testScore:record.correctCount, gameScore:record.score});
+    expect(payload.run).toMatchObject({playerName:'PRIVATE NAME', sex:'male', ageYears:10, bmiStart:null, bmiEnd:null, testScore:record.correctCount, gameScore:record.score});
     const text=JSON.stringify(payload);for(const field of ['local-player','weightKg','heightCm','plannedQuestions','answers','explanation'])expect(text).not.toContain(field);
     expect(()=>validatePayload({kind:'run',run:{...payload.run,gameScore:NaN}})).toThrow();
     expect(()=>validatePayload({kind:'run',run:{...payload.run,testScore:11}})).toThrow();
     expect(()=>validatePayload({kind:'run',run:{...payload.run,bmiEnd:-1}})).toThrow();
     expect(()=>validatePayload({kind:'feedback',contextRunId:record.runId,surveyVersion:'enjoyment-v1',rating:6,eligibleRunCount:3,occurredAt:record.endedAt})).toThrow();
   });
+  it('rejects changed food totals, portions, versions and missing kcal schema', () => {
+    const record = run(), source = cloudRun(record);
+    expect(validatePayload({kind:'run',run:source})).toMatchObject({run:{runSchemaVersion:2,foodIntakeKcal:record.foodIntakeKcal}});
+    for (const patch of [
+      {foodIntakeKcal:-1}, {foodIntakeKcal:source.foodIntakeKcal!+1}, {dailyEnergyKcal:Infinity},
+      {dailyEnergyKcal:0}, {energyStatus:'unavailable'}, {nutritionVersion:'invented'},
+      {runSchemaVersion:undefined}, {collectedFoods:[{foodId:'SHOES',name:'fake',portionLabel:'fake',count:1,kcalPerPortion:20}]},
+    ]) expect(() => validatePayload({kind:'run',run:{...source,...patch}})).toThrow();
+  });
+  it('validates exercise deductions, negative net energy and pre-exercise snapshots', () => {
+    const source=cloudRun(run());
+    const record={...source,foodIntakeKcal:0,collectedFoods:[],exerciseKcal:6.297354861111111,netEnergyKcal:-6.297354861111111,
+      collectedExercises:[{itemType:'ROPE',count:1,...estimateExerciseEnergy(profile).exerciseEstimates.ROPE}]};
+    expect(validatePayload({kind:'run',run:record})).toMatchObject({run:{exerciseKcal:6.297354861111111,netEnergyKcal:-6.297354861111111}});
+    for(const patch of [{exerciseKcal:31},{netEnergyKcal:0},{exerciseModelVersion:'fake'},
+      {collectedExercises:[{itemType:'APPLE',count:1,kcalPerPickup:30}]},
+      {collectedExercises:[{itemType:'ROPE',count:1.5,kcalPerPickup:30}]},
+      {collectedExercises:[{itemType:'ROPE',count:11,kcalPerPickup:30}]},
+      {collectedExercises:[{itemType:'ROPE',count:1,kcalPerPickup:300}]}])
+      expect(()=>validatePayload({kind:'run',run:{...record,...patch}})).toThrow();
+    const previous={...source};delete previous.exerciseModelVersion;delete previous.exerciseKcal;delete previous.netEnergyKcal;delete previous.collectedExercises;delete previous.exerciseEnergyStatus;delete previous.exerciseEnergyReason;
+    expect(validatePayload({kind:'run',run:previous})).toMatchObject({run:{foodIntakeKcal:source.foodIntakeKcal}});
+    expect(()=>validatePayload({kind:'run',run:{...previous,exerciseKcal:30}})).toThrow();
+  });
+  it('reloads old BMI and new kcal runs without backfilling or overwriting terminal snapshots', async () => {
+    const repo = new RunRepository(), fresh = run();
+    const old = {...run(), schemaVersion:1 as const, initialBmi:18, simulatedBmi:19};
+    delete old.foodIntakeKcal; delete old.collectedFoods; delete old.dailyEnergyKcal;
+    await repo.saveRun(old,1); await repo.saveRun(fresh,1);
+    await repo.saveRun({...fresh,foodIntakeKcal:999,collectedFoods:[]},1);
+    const reloaded = (await new RunRepository().load()).runs;
+    expect(reloaded.find(r=>r.runId===old.runId)).toMatchObject({schemaVersion:1,initialBmi:18});
+    expect(reloaded.find(r=>r.runId===old.runId)).not.toHaveProperty('foodIntakeKcal');
+    expect(reloaded.find(r=>r.runId===fresh.runId)).toEqual(fresh);
+    expect(cloudRun(old)).toMatchObject({bmiStart:18,bmiEnd:19});
+    expect(cloudRun(old)).not.toHaveProperty('foodIntakeKcal');
+  });
 });
 
 describe('delivery through the public synchronization boundary', () => {
+  it('keeps kcal and its dependent feedback queued against an older API', async () => {
+    const repo=new RunRepository(), record=run(); await repo.saveRun(record,1); await repo.answerSurvey(record.runId,4);
+    const send=vi.fn(async()=>Response.json({enabled:true}));
+    expect(await new AnalyticsSync(repo,send).flush()).toBe('pending');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect((await repo.analyticsData()).outbox.every(e=>e.state==='pending')).toBe(true);
+  });
+  it('holds exercise deductions and dependent feedback against the first kcal API', async () => {
+    const repo=new RunRepository(),record=run();await repo.saveRun(record,1);await repo.answerSurvey(record.runId,4);
+    const send=vi.fn(async()=>Response.json({enabled:true,runSchemaVersion:2}));
+    expect(await new AnalyticsSync(repo,send).flush()).toBe('pending');expect(send).toHaveBeenCalledTimes(1);
+    expect((await repo.analyticsData()).outbox.every(e=>e.state==='pending')).toBe(true);
+  });
   it('uses the browser fetch function without binding it to the synchronization instance', async () => {
     const repo = new RunRepository(); await repo.saveRun(run(), 1);
     const hostFetch = vi.fn(async function(this: unknown, _url: RequestInfo | URL, init?: RequestInit) {
       if (this instanceof AnalyticsSync) throw new TypeError('Illegal invocation');
-      return Response.json(init?.method ? { ok: true } : { enabled: true });
+      return Response.json(init?.method ? { ok: true } : { enabled: true, runSchemaVersion: 2, exerciseEnergyVersion: 2 });
     });
     vi.stubGlobal('fetch', hostFetch);
     expect(await new AnalyticsSync(repo).flush()).toBe('synced');
@@ -129,7 +180,7 @@ describe('delivery through the public synchronization boundary', () => {
     await repo.prepareSurvey(third.runId);await repo.answerSurvey(third.runId,4);
     const accepted=new Set<string>(), calls:string[]=[];let lose=true;
     const send=vi.fn(async (_url: RequestInfo | URL, init?:RequestInit)=>{
-      if(!init?.method)return Response.json({enabled:true});
+      if(!init?.method)return Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2});
       const p=JSON.parse(String(init.body));const id=p.kind==='run'?p.run.runId:p.kind==='event'?p.eventId:'feedback';calls.push(p.kind);accepted.add(id);
       if(lose){lose=false;throw new Error('lost acknowledgement');}return Response.json({ok:true});
     });
@@ -150,7 +201,7 @@ describe('delivery through the public synchronization boundary', () => {
     const tx=db.transaction('outbox','readwrite');
     tx.objectStore('outbox').put({id:'old-event',playerId:profile.playerId,createdAt:1,attempts:0,nextAttemptAt:0,state:'pending',payload:{kind:'event',eventId:crypto.randomUUID(),contextRunId:record.runId,surveyVersion:'enjoyment-v1',event:'shown',occurredAt:record.endedAt}});
     await new Promise<void>(resolve=>{tx.oncomplete=()=>resolve();});db.close();
-    const kinds:string[]=[]; const send=async(_url:RequestInfo|URL,init?:RequestInit)=>{if(!init?.method)return Response.json({enabled:true});kinds.push(JSON.parse(String(init.body)).kind);return Response.json({ok:true});};
+    const kinds:string[]=[]; const send=async(_url:RequestInfo|URL,init?:RequestInit)=>{if(!init?.method)return Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2});kinds.push(JSON.parse(String(init.body)).kind);return Response.json({ok:true});};
     expect(await new AnalyticsSync(repo,send).flush()).toBe('synced');expect(kinds).toEqual(['run']);
   });
   it('accepts pending v1 scores without fabricating name or BMI', () => {
@@ -159,14 +210,14 @@ describe('delivery through the public synchronization boundary', () => {
   });
   it('stops automatic retries for permanent validation failures and offers explicit retry', async () => {
     const repo=new RunRepository();await repo.saveRun(run(),1);
-    const send=vi.fn(async(_url:RequestInfo|URL,init?:RequestInit)=>init?.method?Response.json({error:'invalid'},{status:400}):Response.json({enabled:true}));
+    const send=vi.fn(async(_url:RequestInfo|URL,init?:RequestInit)=>init?.method?Response.json({error:'invalid'},{status:400}):Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2}));
     const sync=new AnalyticsSync(repo,send);expect(await sync.flush()).toBe('error');await sync.flush();
     expect(send.mock.calls.filter(([,init])=>init?.method)).toHaveLength(1);
     await repo.retryAnalytics();await sync.flush();expect(send.mock.calls.filter(([,init])=>init?.method)).toHaveLength(2);
   });
   it('does not send captured pending rows after local data was cleared', async () => {
     const repo=new RunRepository();await repo.saveRun(run(),1);
-    const send=vi.fn(async(_url:RequestInfo|URL,init?:RequestInit)=>{if(!init?.method){await repo.clear();return Response.json({enabled:true});}return Response.json({ok:true});});
+    const send=vi.fn(async(_url:RequestInfo|URL,init?:RequestInit)=>{if(!init?.method){await repo.clear();return Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2});}return Response.json({ok:true});});
     expect(await new AnalyticsSync(repo,send).flush()).toBe('synced');
     expect(send.mock.calls.filter(([,init])=>init?.method)).toHaveLength(0);
   });

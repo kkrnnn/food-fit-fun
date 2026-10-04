@@ -183,3 +183,19 @@
 .lr-game textarea:focus-visible {outline:3px solid #9b4770;outline-offset:3px}
 .lr-game textarea:disabled {opacity:.6}
 .lr-comment-count {display:block;text-align:right;margin-top:5px}
+
+/* Energy feedback extends the existing game HUD, with no medical colour bands. */
+.lr-energy-hud .lr-energy-total {display:block;font-size:28px;line-height:1.2;margin:5px 0;color:#6c4ee8}
+.lr-energy-total em {font-size:15px;font-style:normal}
+.lr-energy-hud strong {font-size:14px}.lr-energy-hud small {display:block;font-size:11px}
+.lr-kcal-pickups {position:absolute;z-index:3;left:18px;bottom:185px;width:min(460px,calc(100% - 36px));pointer-events:none}
+.lr-kcal-pickups p {margin:6px 0!important;padding:10px 14px;background:#242337ec;color:#fff;border-left:3px solid #ac9afa;border-radius:10px;font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+.lr-energy-result {margin:20px 0;padding:18px;background:#f0ebfc;border:1px solid #e1d8f3;border-radius:18px}
+.lr-energy-summary {display:flex;flex-wrap:wrap;gap:18px 30px}.lr-energy-summary span {font-size:14px}.lr-energy-summary strong {display:block;color:#6c4ee8;font-size:26px}.lr-energy-summary small {font-size:14px}
+.lr-energy-result p {font-size:14px;color:#594974}.lr-energy-result td small {display:block;margin-top:5px;font-size:12px}.lr-energy-result .lr-table-wrap {margin:15px 0}
+.lr-guided-energy {font-size:16px;font-weight:700}
+@media(max-width:600px) {.lr-energy-hud {width:235px;bottom:58px}.lr-energy-hud .lr-energy-total {font-size:25px}.lr-energy-hud strong {font-size:13px}.lr-energy-hud small {display:block;font-size:10px}.lr-kcal-pickups {left:8px;bottom:190px;width:calc(100% - 16px)}.lr-kcal-pickups p {font-size:13px;padding:8px 11px}.lr-energy-result {padding:14px}.lr-energy-summary strong {font-size:23px}.lr-energy-result th,.lr-energy-result td {padding:8px}}
+@media(max-height:500px) and (orientation:landscape) {.lr-energy-hud {bottom:8px;width:235px;padding:8px 12px}.lr-energy-hud .lr-energy-total {font-size:21px;display:inline-block;margin:0 0 0 8px}.lr-energy-hud strong {margin:3px 0;font-size:12px}.lr-kcal-pickups {bottom:125px;width:270px}.lr-kcal-pickups p {font-size:12px}}
+
+/* Pickup narration is accessible; its visible amount lives in the scene burst. */
+.lr-kcal-pickups {position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;clip-path:inset(50%)!important;white-space:nowrap!important}

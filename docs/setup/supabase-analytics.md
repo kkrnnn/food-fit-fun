@@ -46,3 +46,19 @@ Server env บน Vercel Production/Preview: SUPABASE_URL, SUPABASE_SECRET_KEY, 
 ## รายงาน / export
 
 ใช้ SELECT ใน `supabase/analytics-queries.sql` เพื่อ export ข้อมูลผลเล่นโดยไม่รวม token_hash. กรอง demo/content/date ก่อนวิเคราะห์. รายงานดาวนับทั้งจำนวนคำตอบและจำนวนผู้เล่นไม่ซ้ำ. ไม่มี response-rate denominator จาก shown events. ปุ่มล้างในเกมล้างเฉพาะ local; ยังไม่มี automatic retention/delete schedule. ดู [QA](../qa/feedback-every-run-verification.md)
+
+## kcal migration (4 ตุลาคม 2026)
+
+`20261004000200_kcal_energy.sql` เพิ่ม snapshot kcal ใน score โดยคงประวัติ BMI และ feedback ไว้ รอบ schema 2 ส่ง BMI เป็น NULL; รอบ schema 1 อ่าน/ส่งได้และไม่มีการคำนวณ kcal ย้อนหลัง คอลัมน์ใหม่: run_schema_version, daily_energy_kcal, food_intake_kcal, energy_status, energy_reason, energy_model_version, activity_assumption, nutrition_version, scoring_version, collected_foods
+
+RPC ตรวจ catalog/portion counts และยอดรวม; การส่งซ้ำไม่ overwrite รอบเดิม ตารางยังเป็น score/feedback และสิทธิ์ anon/authenticated ไม่เพิ่ม GET API รุ่นใหม่คืน runSchemaVersion=2; client เก็บ kcal ไว้ใน outbox หากพบ API เก่าที่อาจทิ้ง field ใหม่ ปล่อย DB migration ก่อน server/client ใหม่เสมอ
+
+หากใช้ SQL Editor ให้รัน migration แล้ว `supabase/register-kcal-energy.sql` สำหรับลงทะเบียน history ดูหลักฐานการนำขึ้นจริงและ QA ใน [kcal verification](../qa/kcal-game-verification.md)
+
+ตรวจ live schema วันที่ 4 ตุลาคม 2026 หลัง apply kcal migration ผ่าน SQL Editor: มีคอลัมน์ใหม่แล้ว จำนวน score เดิม 23 และ feedback เดิม 4 คงเดิม การเรียก RPC ด้วยยอด kcal ที่ไม่ตรงกับ catalog คืน `invalid` และไม่เพิ่มแถว ผู้ใช้อนุมัติ commit/push/deploy ชัดเจนแล้ววันที่ 4 ตุลาคม 2026
+
+## กิจกรรม 1 นาทีตามน้ำหนัก
+
+Applied `20261004000300_exercise_energy.sql` และ `register-exercise-energy.sql` บน live วันที่ 4 ตุลาคม 2026 ยืนยัน schema/history พร้อมทดสอบ `supabase/tests/exercise-energy.sql` ผ่านและ rollback ข้อมูลทดลองครบ จำนวนข้อมูลเดิมคงที่ 23 score / 4 feedback เพิ่ม exercise_kcal, exercise_model_version, exercise_energy_status/reason, collected_exercises และ generated net_energy_kcal คง food_intake_kcal เป็นยอดอาหารจริงตาม snapshot
+
+ค่ากิจกรรมใช้ NCCOR Youth Compendium + Schofield สำหรับ 6–18 ปี และ 2024 Adult Compendium สำหรับ 19–59 ปี: 1 pickup แทนกิจกรรมจำลอง 1 นาที รองรับ null/unavailable และตรวจ source/code/MET/เวลา/จำนวน/ยอดรวม ไม่ส่งน้ำหนักหรือส่วนสูงโดยตรง ต้องลง migration ก่อน API ที่ประกาศ exerciseEnergyVersion=2 Client จะรอใน outbox จนพร้อม โดยไม่ทิ้งค่าหักของรอบใหม่ ดู [แหล่งอ้างอิง](../research/exercise-energy-reference.md) และ [QA](../qa/kcal-game-verification.md)

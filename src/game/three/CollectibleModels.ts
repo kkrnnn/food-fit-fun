@@ -40,11 +40,18 @@ export function createCollectibleModel(type: ItemType): THREE.Group {
       break;
     }
     case 'BANANA': {
-      for(let i=0;i<3;i++) {
-        const x=(i-1)*.25, z=(i-1)*.12;
-        tube([new THREE.Vector3(x-.55,.55,z),new THREE.Vector3(x-.65,.05,z),new THREE.Vector3(x-.25,-.38,z),new THREE.Vector3(x+.3,-.32,z),new THREE.Vector3(x+.58,.1,z)],.15,0xffd452);
-        sphere(.09,brown,x-.55,.55,z);sphere(.07,brown,x+.58,.1,z);
-      }
+      // One tapered crescent, with a thick peel and two distinct brown tips.
+      const peel=new THREE.Shape();peel.moveTo(-.88,.56);
+      peel.bezierCurveTo(-1.03,-.2,-.56,-.84,.22,-.76);
+      peel.bezierCurveTo(.74,-.69,1.01,-.28,1.02,.22);
+      peel.bezierCurveTo(.75,-.2,.31,-.36,-.08,-.3);
+      peel.bezierCurveTo(-.53,-.25,-.73,.04,-.88,.56);
+      const banana=add(new THREE.ExtrudeGeometry(peel,{depth:.26,bevelEnabled:true,bevelThickness:.09,bevelSize:.07,bevelSegments:3,curveSegments:24,steps:1}),0xffd446,0,0,-.13);
+      banana.name='banana-peel';
+      tube([new THREE.Vector3(-.79,.36,.22),new THREE.Vector3(-.51,-.39,.25),new THREE.Vector3(.23,-.51,.25),new THREE.Vector3(.82,-.02,.22)],.022,0xe8ad2d);
+      const stem=cylinder(.065,.1,.24,brown,-.87,.58);stem.rotation.z=.22;
+      sphere(.065,0x63412b,1.01,.22,.02).scale.set(1,.7,1);
+      body.rotation.z=-.18;
       break;
     }
     case 'BROCCOLI': {
@@ -89,14 +96,24 @@ export function createCollectibleModel(type: ItemType): THREE.Group {
       break;
     }
     case 'MEAL': {
-      box(1.75,.17,1.22,0xe4ded0,0,-.08,0,.12);
-      box(1.61,.08,1.1,cream);
-      box(.065,.08,1.05,0xc8bca8,.08,.06);box(.68,.08,.05,0xc8bca8,.45,.06,.07);
-      sphere(.38,0xfffbf0,-.42,.16,0).scale.set(1,.42,1.1);
-      for(let i=0;i<9;i++){const rice=sphere(.028,0xe5dacf,-.64+(i%3)*.19,.26,-.25+Math.floor(i/3)*.19);rice.scale.set(1.4,.5,.65);}
-      for(let i=0;i<3;i++)box(.16,.13,.36,0xb97845,.24+i*.18,.12,-.28);
-      for(let i=0;i<3;i++){sphere(.12,green,.25+i*.18,.13,.33);sphere(.07,0xf39748,.25+i*.18,.17,.23);}
-      body.rotation.x=.55;
+      // A dinner plate: white rice, a grilled chicken breast, and broccoli.
+      cylinder(1, .92,.12,0xe6edf0,0,-.06);
+      cylinder(.91,.91,.04,0xfffcf1,0,.02);
+      const rim=add(new THREE.TorusGeometry(.94,.07,8,36),0xffffff,0,.03);rim.rotation.x=Math.PI/2;
+      const rice=sphere(.43,0xfffdf2,-.4,.16,-.02);rice.scale.set(1,.62,1.18);rice.name='meal-rice';
+      for(let i=0;i<24;i++) {
+        const a=i*2.4,r=.34*Math.sqrt((i+.5)/24),x=Math.cos(a)*r,z=Math.sin(a)*r;
+        const grain=sphere(.04,0xe7e0cd,-.4+x,.17+Math.sqrt(.43**2-r**2)*.55,z);
+        grain.scale.set(1.6,.5,.7);grain.rotation.y=a;
+      }
+      const chicken=sphere(.4,0xd7934f,.36,.17,-.3);chicken.scale.set(.78,.48,1.25);chicken.rotation.y=-.3;chicken.name='meal-chicken';
+      for(let i=0;i<4;i++) {const mark=box(.4,.014,.035,0x87502d,.37,.33,-.51+i*.13,.008);mark.rotation.y=-.3;}
+      for(const [x,z] of [[.22,.37],[.53,.32],[.44,.6]]) {
+        cylinder(.055,.08,.19,0x85b954,x,.13,z);
+        for(const [dx,dz] of [[-.08,0],[.08,0],[0,.07],[0,-.07]])sphere(.13,green,x+dx,.27,z+dz);
+        sphere(.12,0x3e9456,x,.35,z);
+      }
+      body.rotation.x=.52;
       break;
     }
     case 'WATER': {

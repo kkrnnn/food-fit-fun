@@ -1,31 +1,23 @@
 import type { Lane, SceneItem } from './types';
 
 export const ITEM_CATALOG = {
-  SHOES: { name: 'รองเท้ากีฬา', icon: '👟', effect: 'decrease', magnitude: 20, color: 0x55d6ee },
-  DUMBBELL: { name: 'ดัมเบล', icon: '🏋️', effect: 'decrease', magnitude: 20, color: 0x9775eb },
-  ROPE: { name: 'เชือกกระโดด', icon: '➰', effect: 'decrease', magnitude: 20, color: 0x55d6ee },
-  APPLE: { name: 'แอปเปิล', icon: '🍎', effect: 'decrease', magnitude: 4, color: 0xef545e },
-  ORANGE: { name: 'ส้ม', icon: '🍊', effect: 'decrease', magnitude: 4, color: 0xffa22f },
-  BANANA: { name: 'กล้วย', icon: '🍌', effect: 'decrease', magnitude: 4, color: 0xffd447 },
-  BROCCOLI: { name: 'บรอกโคลี', icon: '🥦', effect: 'decrease', magnitude: 6, color: 0x53b869 },
-  CARROT: { name: 'แครอต', icon: '🥕', effect: 'decrease', magnitude: 4, color: 0xff8739 },
-  MEAL: { name: 'มื้อสมดุล', icon: '🍱', effect: 'decrease', magnitude: 6, color: 0x6ec7b2 },
-  WATER: { name: 'น้ำเปล่า', icon: '💧', effect: 'neutral', magnitude: 0, color: 0x53c7e9 },
-  MILK: { name: 'นมไม่หวาน', icon: '🥛', effect: 'neutral', magnitude: 0, color: 0xe5edf8 },
-  BURGER: { name: 'เบอร์เกอร์', icon: '🍔', effect: 'increase', magnitude: 18, color: 0xe8ac54 },
-  PIZZA: { name: 'พิซซ่า', icon: '🍕', effect: 'increase', magnitude: 18, color: 0xffbc53 },
-  COLA: { name: 'น้ำอัดลม', icon: '🥤', effect: 'increase', magnitude: 28, color: 0xe96392 },
-  DONUT: { name: 'โดนัท', icon: '🍩', effect: 'increase', magnitude: 28, color: 0xec83b6 },
+  SHOES: { name: 'รองเท้ากีฬา', icon: '👟', category: 'exercise', color: 0x55d6ee },
+  DUMBBELL: { name: 'ดัมเบล', icon: '🏋️', category: 'exercise', color: 0x9775eb },
+  ROPE: { name: 'เชือกกระโดด', icon: '➰', category: 'exercise', color: 0x55d6ee },
+  APPLE: { name: 'แอปเปิล', icon: '🍎', category: 'everyday', color: 0xef545e },
+  ORANGE: { name: 'ส้ม', icon: '🍊', category: 'everyday', color: 0xffa22f },
+  BANANA: { name: 'กล้วย', icon: '🍌', category: 'everyday', color: 0xffd447 },
+  BROCCOLI: { name: 'บรอกโคลี', icon: '🥦', category: 'everyday', color: 0x53b869 },
+  CARROT: { name: 'แครอต', icon: '🥕', category: 'everyday', color: 0xff8739 },
+  MEAL: { name: 'มื้อสมดุล', icon: '🍱', category: 'everyday', color: 0x6ec7b2 },
+  WATER: { name: 'น้ำเปล่า', icon: '💧', category: 'drink', color: 0x53c7e9 },
+  MILK: { name: 'นมไม่หวาน', icon: '🥛', category: 'drink', color: 0xe5edf8 },
+  BURGER: { name: 'เบอร์เกอร์', icon: '🍔', category: 'occasional', color: 0xe8ac54 },
+  PIZZA: { name: 'พิซซ่า', icon: '🍕', category: 'occasional', color: 0xffbc53 },
+  COLA: { name: 'น้ำอัดลม', icon: '🥤', category: 'occasional', color: 0xe96392 },
+  DONUT: { name: 'โดนัท', icon: '🍩', category: 'occasional', color: 0xec83b6 },
 } as const;
 export type ItemType = keyof typeof ITEM_CATALOG;
-export const BODY_TUNING = { multiplier: .0025, limit: 100 } as const;
-export function itemBalance(balance: number, type: ItemType): number {
-  const item = ITEM_CATALOG[type];
-  return Math.max(-BODY_TUNING.limit, Math.min(BODY_TUNING.limit, balance + (item.effect === 'decrease' ? -item.magnitude : item.magnitude)));
-}
-export function simulatedBmi(initial: number, balance: number): number {
-  return initial * (1 + Math.max(-100, Math.min(100, balance)) * BODY_TUNING.multiplier);
-}
 export const isExercise = (type: ItemType): boolean => ['SHOES','DUMBBELL','ROPE'].includes(type);
 /** Shuffled bags avoid a repeating food sequence; every encounter is a single optional item. */
 export function createItemLayout(seed: number, spacing: number): SceneItem[] {

@@ -45,7 +45,7 @@ export class RunRepository {
     ]);
     await done;
     const validProfiles = profiles.filter(p => validateProfile(p).length === 0);
-    const validRuns = runs.filter(r => r.schemaVersion === 1 && typeof r.runId === 'string' && Array.isArray(r.answers));
+    const validRuns = runs.filter(r => [1, 2].includes(r.schemaVersion) && typeof r.runId === 'string' && Array.isArray(r.answers));
     return { profiles: validProfiles, runs: validRuns, bank: bank ? parseBank(bank) : null };
   }
   async saveProfile(profile: Profile): Promise<void> {
@@ -67,7 +67,7 @@ export class RunRepository {
     priorReq.onsuccess = () => {
       const prior = priorReq.result as RunRecord | undefined;
       // Late progress writes cannot undo a terminal record or remove already persisted answers.
-      if (prior && ((prior.outcome !== 'in_progress' && snapshot.outcome === 'in_progress') || prior.answers.length > snapshot.answers.length)) return;
+      if (prior && (prior.outcome !== 'in_progress' || prior.answers.length > snapshot.answers.length)) return;
       store.put(snapshot);
       queueTerminal(tx, snapshot, prior);
       const id = `${snapshot.playerId}:${snapshot.contentVersion}`;
@@ -205,8 +205,8 @@ export function exportData(runs: RunRecord[]) {
   const rows = (headers: string[], values: unknown[][]) => '\ufeff' + [headers, ...values].map(row => row.map(csvCell).join(',')).join('\r\n');
   return {
     json: JSON.stringify({ schemaVersion: 1, exportedAt: new Date().toISOString(), runs: safe }, null, 2),
-    runsCsv: rows(['runId','playerId','ageYearsAtStart','agePrecision','ageMonthsAtStart','contentVersion','blueprintVersion','inputMode','outcome','reason','demo','score','answered','correct','incorrect','unreached','distance','trackingPauseCount','trackingPauseMs','startedAt'],
-      runs.map(r => [r.runId,r.playerId,Math.floor(r.ageMonthsAtStart / 12),r.agePrecision ?? 'months',r.ageMonthsAtStart,r.contentVersion,r.blueprintVersion,r.inputModeGroup,r.outcome,r.endReason,r.demo,r.score,r.answers.length,r.correctCount,r.incorrectCount,r.unreachedCount,r.distance,r.trackingPauseCount,r.trackingPauseMs,r.startedAt])),
+    runsCsv: rows(['runId','playerId','ageYearsAtStart','agePrecision','ageMonthsAtStart','contentVersion','blueprintVersion','inputMode','outcome','reason','demo','score','answered','correct','incorrect','unreached','distance','trackingPauseCount','trackingPauseMs','startedAt','dailyEnergyKcal','foodIntakeKcal','exerciseKcal','netEnergyKcal','exerciseModelVersion','exerciseEnergyStatus','exerciseEnergyReason','energyStatus','energyModelVersion','activityAssumption','nutritionVersion','scoringVersion'],
+      runs.map(r => [r.runId,r.playerId,Math.floor(r.ageMonthsAtStart / 12),r.agePrecision ?? 'months',r.ageMonthsAtStart,r.contentVersion,r.blueprintVersion,r.inputModeGroup,r.outcome,r.endReason,r.demo,r.score,r.answers.length,r.correctCount,r.incorrectCount,r.unreachedCount,r.distance,r.trackingPauseCount,r.trackingPauseMs,r.startedAt,r.dailyEnergyKcal,r.foodIntakeKcal,r.exerciseKcal,r.foodIntakeKcal === undefined ? undefined : r.collectedExercises?.some(e=>e.kcalPerPickup===null) ? null : r.foodIntakeKcal-(r.exerciseKcal ?? 0),r.exerciseModelVersion,r.exerciseEnergyStatus,r.exerciseEnergyReason,r.energyStatus,r.energyModelVersion,r.activityAssumption,r.nutritionVersion,r.scoringVersion])),
     answersCsv: rows(['runId','playerId','ageYearsAtStart','agePrecision','ageMonthsAtStart','contentVersion','questionId','revision','topic','difficulty','optionMapping','selectedOptionId','correctOptionId','isCorrect','isFirstExposure','exposureCount','readMs','selectionMs','wrongStreakAfter'],
       runs.flatMap(r => r.answers.map(a => [r.runId,r.playerId,Math.floor(r.ageMonthsAtStart / 12),r.agePrecision ?? 'months',r.ageMonthsAtStart,r.contentVersion,a.questionId,a.revision,a.topic,a.difficulty,JSON.stringify(a.options),a.selectedOptionId,a.correctOptionId,a.isCorrect,a.isFirstExposure,a.exposureCount,a.readMs,a.selectionMs,a.wrongStreakAfter]))),
   };

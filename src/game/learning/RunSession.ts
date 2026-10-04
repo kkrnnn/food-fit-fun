@@ -1,4 +1,8 @@
-import { isExercise, createItemLayout, itemBalance, simulatedBmi } from './ItemCatalog';
+import { isExercise, createItemLayout } from './ItemCatalog';
+import { estimateExerciseEnergy, exerciseDeduction, netGameEnergy } from './ExerciseEnergy';
+import { FOOD_NUTRITION, NUTRITION_VERSION } from './FoodNutrition';
+import { estimateEnergy, gameBodyWidth } from '../../features/health/energy';
+import { validateProfile } from '../../features/health/assessment';
 import { jumpProgress, jumpHeight, GROUND_CLEARANCE_HEIGHT, JUMP_COOLDOWN_MS } from './JumpArc';
 import type { Lane, InputMode, PlannedQuestion, Profile, RunRecord, SceneItem, Snapshot, Phase, Outcome } from './types';
 
@@ -10,9 +14,7 @@ export const QUIZ_SECONDS = 6;
 export const QUIZ_APPROACH_DISTANCE = COURSE_SPEED * QUIZ_SECONDS;
 export const COURSE_VIEW_DISTANCE = COURSE_SPEED * 14;
 export const LEVEL_VERSION = 'learning-continuous-course-ground-jump-v9';
-export const SCORING_VERSION = 'learning-1500-v2';
-export const BODY_MODEL_VERSION = 'bmi-small-food-large-exercise-v4';
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+export const SCORING_VERSION = 'learning-distance-1500-v3';
 
 /** Owns every gameplay rule; rendering and input adapters send commands here. */
 export class RunSession {
@@ -40,17 +42,18 @@ export class RunSession {
 
   constructor(profile: Profile, questions: PlannedQuestion[], options: { runId: string; startedAt: string; seed: number; demo: boolean; contentVersion: string; blueprintVersion: string; mode: InputMode }) {
     if (questions.length !== 10 || new Set(questions.map(q => q.question.questionId)).size !== 10) throw new Error('รอบต้องมี 10 คำถามที่ไม่ซ้ำ');
-    const initialBmi = profile.weightKg / (profile.heightCm / 100) ** 2;
-    if (!Number.isFinite(initialBmi) || initialBmi <= 0) throw new Error('ตรวจส่วนสูงและน้ำหนักก่อนเริ่มเกม');
+    const errors = validateProfile(profile);
+    if (errors.length) throw new Error(errors.join(' · '));
+    const energy = estimateEnergy(profile);
     this.controlValid = options.mode === 'manual';
     this.record = {
-      schemaVersion: 1, runId: options.runId, playerId: profile.playerId, startedAt: options.startedAt,
+      schemaVersion: 2, runId: options.runId, playerId: profile.playerId, startedAt: options.startedAt,
       outcome: 'in_progress', ageMonthsAtStart: profile.ageMonths, agePrecision: profile.agePrecision ?? 'months', profileVersion: profile.version,
       playerNameAtStart: profile.nickname, sexAtStart: profile.sex,
       levelVersion: LEVEL_VERSION, scoringVersion: SCORING_VERSION, contentVersion: options.contentVersion, blueprintVersion: options.blueprintVersion,
       seed: options.seed, demo: options.demo, plannedQuestions: structuredClone(questions), answers: [], distance: 0, activePlayMs: 0,
-      initialBmi, simulatedBmi: initialBmi, bodyModelVersion: BODY_MODEL_VERSION,
-      balance: 0, balancedDistance: 0, correctCount: 0, incorrectCount: 0, unreachedCount: 10, maxWrongStreak: 0, score: 0,
+      ...energy, nutritionVersion: NUTRITION_VERSION, foodIntakeKcal: 0, collectedFoods: [], exerciseKcal: 0, ...estimateExerciseEnergy(profile), collectedExercises: [],
+      correctCount: 0, incorrectCount: 0, unreachedCount: 10, maxWrongStreak: 0, score: 0,
       inputModeGroup: options.mode, inputTimeline: [{ mode: options.mode, atMs: 0 }], trackingPauseCount: 0, trackingPauseMs: 0, itemCounts: {},
     };
     this.items = createItemLayout(options.seed, GATE_SPACING);
@@ -112,8 +115,6 @@ export class RunSession {
       else if (row.some(e => isExercise(e.type))) this.record.exerciseMissed=(this.record.exerciseMissed ?? 0)+1;
 
     }
-    // Fictional body change for feedback only; never changes the saved player's measurements.
-    this.record.simulatedBmi = simulatedBmi(this.record.initialBmi!, this.record.balance);
     this.travel(end);
     if (approach) this.selectionMs += (end - before) / COURSE_SPEED * 1000;
     if (end === checkpoint) {
@@ -124,18 +125,30 @@ export class RunSession {
   }
   private travel(to: number): void {
     const delta = to - this.record.distance;
-    if (Math.abs(this.record.balance) <= 20) this.record.balancedDistance += delta;
     this.record.activePlayMs += delta / COURSE_SPEED * 1000;
     this.record.distance = to;
   }
   private applyItem(item: SceneItem): void {
     this.record.itemCounts[item.type] = (this.record.itemCounts[item.type] ?? 0) + 1;
-    const before = simulatedBmi(this.record.initialBmi!, this.record.balance);
-    this.record.balance = itemBalance(this.record.balance, item.type);
-    const delta = simulatedBmi(this.record.initialBmi!, this.record.balance) - before;
-    this.feedback = ''; 
-    this.events.push({ kind: 'item', id: item.id, type: item.type, delta, feedback: this.feedback });
+    const food = FOOD_NUTRITION[item.type];
+    const deltaKcal = food ? food.kcalPerPortion : exerciseDeduction(item.type,this.record.exerciseEstimates) === null ? null : -exerciseDeduction(item.type,this.record.exerciseEstimates)!;
+    if (!food && !isExercise(item.type)) throw new Error('ไม่มีข้อมูลพลังงานของอาหารนี้');
+    if (food) {
+      this.record.foodIntakeKcal! += food.kcalPerPortion;
+      const saved = this.record.collectedFoods!.find(f => f.foodId === item.type);
+      if (saved) saved.count++;
+      else this.record.collectedFoods!.push({ foodId: item.type, name: food.name, portionLabel: food.portionLabel, kcalPerPortion: food.kcalPerPortion, count: 1 });
+    }
+    if (isExercise(item.type)) {
+      this.record.exerciseKcal! += exerciseDeduction(item.type,this.record.exerciseEstimates) ?? 0;
+      const saved=this.record.collectedExercises!.find(e=>e.itemType===item.type);
+      if(saved)saved.count++;
+      else this.record.collectedExercises!.push({itemType:item.type,count:1,...this.record.exerciseEstimates![item.type],kcalPerPickup:exerciseDeduction(item.type,this.record.exerciseEstimates)});
+    }
+    this.feedback = '';
+    this.events.push({ kind: 'item', id: item.id, type: item.type, deltaKcal });
   }
+
   private resolveAnswer(): void {
     const planned = this.record.plannedQuestions[this.questionIndex];
     const q = planned.question;
@@ -163,7 +176,7 @@ export class RunSession {
     if (this.phase === 'terminal') return;
     this.phase = 'terminal'; this.paused = false;
     this.record.outcome = outcome; this.record.endReason = reason; this.record.endedAt = endedAt;
-    this.record.score = this.record.correctCount * 100 + Math.round(this.record.balancedDistance / LEVEL_DISTANCE * 200) + (outcome === 'completed' ? 300 : 0);
+    this.record.score = this.record.correctCount * 100 + Math.round(this.record.distance / LEVEL_DISTANCE * 200) + (outcome === 'completed' ? 300 : 0);
   }
   visibleItems(): SceneItem[] {
     if (this.phase === 'terminal') return [];
@@ -171,10 +184,11 @@ export class RunSession {
     return this.items.filter(e => !this.processed.has(e.id) && e.distance > this.record.distance && e.distance - this.record.distance <= COURSE_VIEW_DISTANCE);
   }
   snapshot(): Snapshot {
-    const initialBmi = this.record.initialBmi!;
-    const simulatedBmi = this.record.simulatedBmi!;
-    return structuredClone({ jumpProgress: jumpProgress(this.record.activePlayMs-this.jumpStarted), initialBmi, simulatedBmi, characterWidthScale: clamp(simulatedBmi / 18, .75, 1.5), phase: this.phase, paused: this.paused, distance: this.record.distance, balance: this.record.balance,
-      balancedDistance: this.record.balancedDistance, lane: this.lane, wrongStreak: this.wrongStreak, questionIndex: this.questionIndex,
+    return structuredClone({ jumpProgress: jumpProgress(this.record.activePlayMs-this.jumpStarted),
+      foodIntakeKcal: this.record.foodIntakeKcal!, exerciseKcal: this.record.exerciseKcal ?? 0,
+      netEnergyKcal: netGameEnergy(this.record.foodIntakeKcal!, this.record.exerciseKcal,this.record.collectedExercises?.some(e=>e.kcalPerPickup===null)), dailyEnergyKcal: this.record.dailyEnergyKcal ?? null,
+      energyReason: this.record.energyReason ?? '', characterWidthScale: gameBodyWidth(netGameEnergy(this.record.foodIntakeKcal ?? 0, this.record.exerciseKcal,this.record.collectedExercises?.some(e=>e.kcalPerPickup===null)) ?? 0, this.record.dailyEnergyKcal ?? null), phase: this.phase, paused: this.paused, distance: this.record.distance,
+      lane: this.lane, wrongStreak: this.wrongStreak, questionIndex: this.questionIndex,
       question: this.record.plannedQuestions[this.questionIndex], lastAnswer: this.record.answers[this.record.answers.length - 1],
       approachProgress: this.selectionMs / (QUIZ_SECONDS * 1000),
       waitingForLane: this.phase === 'quiz_approach' && this.record.distance === (this.questionIndex + 1) * GATE_SPACING && (!this.controlValid || this.laneStableMs < 300),
@@ -182,4 +196,4 @@ export class RunSession {
   }
 }
 
-export type RunEvent = { kind: 'item'; id: string; type: SceneItem['type']; delta: number; feedback: string } | { kind: 'answer'; id: string; correct: boolean };
+export type RunEvent = { kind: 'item'; id: string; type: SceneItem['type']; deltaKcal: number | null } | { kind: 'answer'; id: string; correct: boolean };

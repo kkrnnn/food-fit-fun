@@ -1,3 +1,5 @@
+import { formatGameKcal } from '../learning/ExerciseEnergy';
+import { formatKcal } from '../../features/health/energy';
 import { pickupFeedback } from '../learning/PickupFeedback';
 import { ITEM_CATALOG, isExercise, type ItemType as LearningItemType } from '../learning/ItemCatalog';
 import { jumpHeight } from '../learning/JumpArc';
@@ -18,6 +20,8 @@ interface BurstEffect {
   mesh: THREE.Group;
   particles: THREE.Points;
   ring: THREE.Mesh;
+  label?: THREE.Sprite;
+  followPlayerOffset?: THREE.Vector3;
   age: number;
   lifetime: number;
   velocities: THREE.Vector3[];
@@ -683,7 +687,7 @@ export class GameEngine3D {
 
     // Quiet footprint ring separates a collectible from the road.
     const catalog = ITEM_CATALOG[type as LearningItemType];
-    const ringColor = catalog ? isExercise(type as LearningItemType) ? 0xd4b867 : catalog.effect === 'increase' ? 0xd99b83 : 0x80b9a5 : type === 'OBSTACLE_LOW' ? 0xef4444 : 0x8dbac4;
+    const ringColor = catalog ? isExercise(type as LearningItemType) ? 0xd4b867 : catalog.category === 'occasional' ? 0xd99b83 : 0x80b9a5 : type === 'OBSTACLE_LOW' ? 0xef4444 : 0x8dbac4;
     const ringGeo = new THREE.RingGeometry(.92, 1.02, 24);
     const ringMat = new THREE.MeshBasicMaterial({ 
       color: ringColor, 
@@ -730,12 +734,30 @@ export class GameEngine3D {
     this.entities.push({ mesh: group, type, lane, z, altitude, doorInfo, itemMesh, floatBaseY, floatPhase });
   }
 
-  public learningPickup(type: LearningItemType, reducedMotion: boolean) {
+  public learningPickup(type: LearningItemType, reducedMotion: boolean, deltaKcal: number | null) {
     const feedback=pickupFeedback(type);
     const position=new THREE.Vector3(this.playerMesh.position.x,1.5+this.playerMesh.position.y,0);
-    // A ring remains visible with reduced motion; no badge, tooltip or BMI text.
-    this.createBurstEffect(position,feedback.color,reducedMotion ? 0 : feedback.particles,1.05,true,feedback.kind==='caution',reducedMotion);
-    if(feedback.kind==='exercise')this.createBurstEffect(new THREE.Vector3(this.playerMesh.position.x,.2,0),0xffdc65,reducedMotion?0:14,.9,true,false,reducedMotion);
+    // The amount is anchored to the collection ring, facing the camera.
+    const burst = this.createBurstEffect(position,feedback.color,reducedMotion ? 0 : feedback.particles,1.35,true,feedback.kind==='caution',reducedMotion);
+    burst.followPlayerOffset=position.clone().sub(this.playerMesh.position);
+    {
+      const canvas = document.createElement('canvas'); canvas.width=512; canvas.height=128;
+      const ctx=canvas.getContext('2d');
+      if (ctx) {
+        ctx.font='900 64px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.lineJoin='round';ctx.lineWidth=12;ctx.strokeStyle='#39304f';
+        const text=deltaKcal===null?'เก็บแล้ว':`${deltaKcal > 0 ? '+' : ''}${isExercise(type)?formatGameKcal(deltaKcal):formatKcal(deltaKcal)} kcal`;
+        ctx.strokeText(text,256,64);ctx.fillStyle='#fff9d9';ctx.fillText(text,256,64);
+        const texture=new THREE.CanvasTexture(canvas);
+        const label=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,transparent:true,depthTest:false,depthWrite:false}));
+        label.position.y=.65;label.scale.set(2.85,.7125,1);label.renderOrder=20;
+        burst.mesh.add(label);burst.label=label;
+      }
+    }
+    if(feedback.kind==='exercise') {
+      const exercise=this.createBurstEffect(new THREE.Vector3(this.playerMesh.position.x,.2,0),0xffdc65,reducedMotion?0:14,.9,true,false,reducedMotion);
+      exercise.followPlayerOffset=new THREE.Vector3(0,.2,0).sub(new THREE.Vector3(0,this.playerMesh.position.y,0));
+    }
   }
 
   public learningEffect(correct: boolean, reducedMotion: boolean) {
@@ -1061,10 +1083,12 @@ export class GameEngine3D {
       const oldest = this.burstEffects.shift()!;
       this.disposeBurst(oldest);
     }
+    return this.burstEffects[this.burstEffects.length - 1];
   }
 
   private disposeBurst(effect: BurstEffect) {
     this.scene.remove(effect.mesh);
+    if (effect.label) { effect.label.material.map?.dispose(); effect.label.material.dispose(); }
     effect.particles.geometry.dispose();
     (effect.particles.material as THREE.Material).dispose();
     effect.ring.geometry.dispose();
@@ -1074,8 +1098,13 @@ export class GameEngine3D {
   private updateBurstEffects(dt: number) {
     for (let i = this.burstEffects.length - 1; i >= 0; i--) {
       const effect = this.burstEffects[i];
+      if(effect.followPlayerOffset)effect.mesh.position.copy(this.playerMesh.position).add(effect.followPlayerOffset);
       effect.age += dt;
       const t = Math.min(1, effect.age / effect.lifetime);
+      if (effect.label) {
+        effect.label.position.y=.65+(effect.ring.userData.reduced ? 0 : t*.55);
+        effect.label.material.opacity=Math.min(1,(1-t)*4);
+      }
       const points = effect.particles.geometry.attributes.position as THREE.BufferAttribute;
       const values = points.array as Float32Array;
       for (let p = 0; p < effect.velocities.length; p++) {

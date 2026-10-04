@@ -1,4 +1,4 @@
-import { ITEM_CATALOG, itemBalance } from './ItemCatalog';
+import { FOOD_NUTRITION } from './FoodNutrition';
 import { describe, expect, it } from 'vitest';
 import { createQuestionSet, DEMO_BANK, parseBank } from './QuestionDeck';
 import { RunSession, LEVEL_DISTANCE, GATE_SPACING, COURSE_SPEED, QUIZ_APPROACH_DISTANCE, QUIZ_SECONDS, TARGET_RUN_SECONDS } from './RunSession';
@@ -29,7 +29,7 @@ describe('learning run through the public commands', () => {
       const after = run.snapshot();
       if (airborne) {
         expect(jumpHeight(after.jumpProgress)).toBeGreaterThan(GROUND_CLEARANCE_HEIGHT);
-        expect(after.simulatedBmi).toBe(before.simulatedBmi);
+        expect(after.foodIntakeKcal).toBe(before.foodIntakeKcal);
         expect(after.record.itemCounts[item.type]).toBeUndefined();
         expect(run.drainEvents()).toEqual([]);
       } else {
@@ -97,13 +97,15 @@ describe('learning run through the public commands', () => {
     run.advance(.3); expect(run.snapshot().record.answers).toHaveLength(1);
     run.advance(20); expect(run.snapshot().record.answers).toHaveLength(1);
   });
-  it('updates item effects once, does not change the real profile, and measures balance by course distance', () => {
+  it('adds one portion once, preserves the profile and freezes energy on pause', () => {
     const run = makeRun(); const real = structuredClone(PROFILE);
     const first = run.visibleItems()[0];
     run.setLane(first.lane); run.advance(first.distance / COURSE_SPEED);
-    expect(run.snapshot().balance).toBe(itemBalance(0,first.type)); expect(run.snapshot().record.itemCounts[first.type]).toBe(1);
-    run.advance(.01); expect(run.snapshot().record.itemCounts[first.type]).toBe(1);
-    run.pause(); run.advance(100); expect(run.snapshot().balancedDistance).toBeCloseTo(first.distance + (Math.abs(run.snapshot().balance)<=20 ? COURSE_SPEED*.01 : 0));
+    expect(run.snapshot().foodIntakeKcal).toBe(FOOD_NUTRITION[first.type]!.kcalPerPortion);
+    expect(run.snapshot().record.itemCounts[first.type]).toBe(1);
+    const before = run.snapshot(); run.advance(.01); run.pause(); run.advance(100);
+    expect(run.snapshot().foodIntakeKcal).toBe(before.foodIntakeKcal);
+    expect(run.snapshot().dailyEnergyKcal).toBe(before.dailyEnergyKcal);
     expect(PROFILE).toEqual(real);
   });
   it('emits pickup and answer feedback once even when UI polls snapshots repeatedly',()=>{
@@ -120,24 +122,46 @@ describe('learning run through the public commands', () => {
     expect(r.answers).toHaveLength(0); expect(r.incorrectCount).toBe(0); expect(r.unreachedCount).toBe(10);
     run.endRun('completed','finish'); expect(run.snapshot().record).toEqual(r);
   });
-  it('missing a ground item leaves BMI unchanged and emits no penalty',()=>{
+  it('missing a ground item leaves energy unchanged and emits no penalty',()=>{
     const run=makeRun(),item=run.visibleItems()[0],initial=run.snapshot();
     run.setLane(((item.lane+1)%3) as 0|1|2);run.advance(item.distance/COURSE_SPEED+.01);
-    expect(run.snapshot().balance).toBe(initial.balance);expect(run.snapshot().simulatedBmi).toBe(initial.simulatedBmi);expect(run.drainEvents()).toEqual([]);
+    expect(run.snapshot().foodIntakeKcal).toBe(initial.foodIntakeKcal);expect(run.drainEvents()).toEqual([]);
   });
-  it('uses profile BMI for the character and changes only the fictional body on item collection', () => {
+  it('starts at zero, snapshots daily energy and keeps initial character size independent of profile', () => {
     const run = makeRun(); const initial = run.snapshot();
-    expect(initial.initialBmi).toBeCloseTo(35 / 1.4 ** 2);
-    expect(initial.simulatedBmi).toBe(initial.initialBmi);
-    const burger = run.visibleItems()[0];
-    run.setLane(burger.lane); run.advance(burger.distance / COURSE_SPEED);
+    expect(initial.foodIntakeKcal).toBe(0); expect(initial.record.schemaVersion).toBe(2);
+    expect(initial.record).not.toHaveProperty('initialBmi'); expect(initial.record).not.toHaveProperty('simulatedBmi');
+    const food = run.visibleItems()[0];
+    run.setLane(food.lane); run.advance(food.distance / COURSE_SPEED);
     const changed = run.snapshot();
-    expect(changed.initialBmi).toBe(initial.initialBmi);
-    expect(changed.simulatedBmi).toBeCloseTo(initial.initialBmi * (1+ITEM_CATALOG[burger.type].magnitude*.0025));
-    expect(changed.characterWidthScale).toBeGreaterThan(initial.characterWidthScale);
-    expect(PROFILE.weightKg).toBe(35);
+    expect(changed.dailyEnergyKcal).toBe(initial.dailyEnergyKcal);
+    expect(changed.foodIntakeKcal).toBe(FOOD_NUTRITION[food.type]!.kcalPerPortion);
+    expect(changed.characterWidthScale).toBe(1);
     const heavier = new RunSession({ ...PROFILE, weightKg:45 }, initial.record.plannedQuestions, { runId:'heavier',seed:42,startedAt:initial.record.startedAt,demo:true,contentVersion:DEMO_BANK.contentVersion,blueprintVersion:DEMO_BANK.blueprintVersion,mode:'manual' });
-    expect(heavier.snapshot().characterWidthScale).toBeGreaterThan(initial.characterWidthScale);
+    expect(heavier.snapshot().characterWidthScale).toBe(1);
+    expect(heavier.snapshot().dailyEnergyKcal).toBeGreaterThan(initial.dailyEnergyKcal!);
+  });
+  it('grows after collected food exceeds the daily estimate, resets next round, and keeps score independent', () => {
+    const run=makeRun();
+    while(run.snapshot().phase!=='terminal') {
+      const before=run.snapshot();
+      if(before.phase==='quiz_approach') {
+        const q=before.question!;
+        run.setLane(q.options.findIndex(o=>o.optionId===q.question.correctOptionId) as 0|1|2);
+        run.advance(6);run.continueAfterFeedback();
+      } else {
+        const food=run.visibleItems().find(i=>i.distance>before.distance && FOOD_NUTRITION[i.type]);
+        if(food) {run.setLane(food.lane);run.advance((food.distance-before.distance)/COURSE_SPEED);}
+        else run.advance(10000);
+      }
+      const after=run.snapshot();
+      if(after.foodIntakeKcal<=after.dailyEnergyKcal!)expect(after.characterWidthScale).toBe(1);
+      else expect(after.characterWidthScale).toBeGreaterThan(1);
+      expect(after.characterWidthScale).toBeLessThanOrEqual(1.65);
+    }
+    expect(run.snapshot().foodIntakeKcal).toBeGreaterThan(run.snapshot().dailyEnergyKcal!);
+    expect(run.snapshot().record.score).toBe(1500);
+    expect(makeRun().snapshot().characterWidthScale).toBe(1);
   });
   it('finishes on the tenth answer gate at three minutes without a post-quiz segment', () => {
     const run = makeRun();
@@ -161,7 +185,7 @@ describe('learning run through the public commands', () => {
     run.advance(1000);
     const r = run.snapshot().record;
     expect(r.inputModeGroup).toBe('mixed'); expect(r.inputTimeline).toHaveLength(3);
-    expect(r.score).toBeGreaterThanOrEqual(1300); expect(r.score).toBeLessThanOrEqual(1500);
+    expect(r.score).toBe(1500);
   });
 });
 

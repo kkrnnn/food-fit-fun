@@ -24,7 +24,7 @@ describe('guided pause-and-act course',()=>{
     expect(tutorial.view(base).completed).toBe(true);expect(run.snapshot()).toEqual(base);
   });
   it('upgrades returning players with only the new jump step',()=>{
-    const t=new GuidedTutorial(true),base=makeRun().snapshot();t.setLane(1);for(let i=0;i<60;i++)t.advance(.1);expect(t.view(base).stage).toBe('jump');expect(t.jump()).toBe(true);for(let i=0;i<60;i++)t.advance(.1);expect(t.view(base).completed).toBe(true);expect(t.view(base).snapshot.simulatedBmi).toBeCloseTo(base.initialBmi*1.01);
+    const t=new GuidedTutorial(true),base=makeRun().snapshot();t.setLane(1);for(let i=0;i<60;i++)t.advance(.1);expect(t.view(base).stage).toBe('jump');expect(t.jump()).toBe(true);for(let i=0;i<60;i++)t.advance(.1);expect(t.view(base).completed).toBe(true);expect(t.view(base).snapshot.foodIntakeKcal).toBe(130);expect(t.view(base).snapshot.characterWidthScale).toBe(1);
   });
   it('does not progress from invalid tracking or while the tab is inactive',()=>{
     const tutorial=new GuidedTutorial(),base=makeRun().snapshot();tutorial.setLane(1);
