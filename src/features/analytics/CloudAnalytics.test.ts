@@ -26,7 +26,7 @@ describe('local survey and atomic delivery queue', () => {
     expect((await repo.prepareSurvey(third.runId)).visible).toBe(true);
     await repo.answerSurvey(third.runId,4,'  อยากได้อาหารเพิ่ม 🍎\nกระโดดสนุกดี  ');
     const reloaded=new RunRepository();
-    expect((await reloaded.prepareSurvey(third.runId)).state).toMatchObject({submitted:true,rating:4,comment:'อยากได้อาหารเพิ่ม 🍎\nกระโดดสนุกดี'});
+    expect((await reloaded.prepareSurvey(third.runId)).state).toMatchObject({status:'submitted',rating:4,comment:'อยากได้อาหารเพิ่ม 🍎\nกระโดดสนุกดี'});
     await reloaded.answerSurvey(third.runId,1,'replacement');
     const received:unknown[]=[];
     const send=async(_url:RequestInfo|URL,init?:RequestInit)=>{
@@ -43,25 +43,33 @@ describe('local survey and atomic delivery queue', () => {
     expect(validatePayload({...payload,comment:'ก'.repeat(1000)})).toMatchObject({comment:'ก'.repeat(1000)});
     for(const comment of [null,123,{},[], 'ก'.repeat(1001)])expect(()=>validatePayload({...payload,comment})).toThrow();
   });
-  it('asks after three unique finished runs (including demo), skips for three more and never asks after submitting', async () => {
+  it('asks after every finished run, while skip and submit close only that run', async () => {
     const repo = new RunRepository();
     const first = run(); await repo.saveRun(first,1); await repo.saveRun(first,1);
-    await repo.saveRun(run('abandoned'),1);
-    expect((await repo.prepareSurvey(first.runId)).visible).toBe(false);
-    const second = run(); await repo.saveRun(second,1); expect((await repo.prepareSurvey(second.runId)).visible).toBe(false);
-    const third = run(); await repo.saveRun(third,1);
-    expect((await repo.prepareSurvey(third.runId)).state.eligibleCount).toBe(3);
-    expect((await new RunRepository().prepareSurvey(third.runId)).visible).toBe(true);
+    expect((await repo.prepareSurvey(first.runId)).visible).toBe(true);
+    const abandoned=run('abandoned');await repo.saveRun(abandoned,1);
+    expect((await repo.prepareSurvey(abandoned.runId)).visible).toBe(false);
     expect((await repo.analyticsData()).outbox.filter(e => e.payload.kind === 'event')).toHaveLength(0);
-    await repo.answerSurvey(third.runId,null); await repo.answerSurvey(third.runId,null);
-    expect((await repo.prepareSurvey(third.runId)).visible).toBe(false);
-    for (let i=0;i<2;i++) { const r=run(); await repo.saveRun(r,1); expect((await repo.prepareSurvey(r.runId)).visible).toBe(false); }
-    const sixth=run();await repo.saveRun(sixth,1);expect((await repo.prepareSurvey(sixth.runId)).visible).toBe(true);
-    await repo.answerSurvey(sixth.runId,5); await repo.answerSurvey(sixth.runId,1);
-    const saved = await new RunRepository().prepareSurvey(sixth.runId); expect(saved.visible).toBe(false);expect(saved.state.rating).toBe(5);
-    const seventh=run();await repo.saveRun(seventh,1);expect((await repo.prepareSurvey(seventh.runId)).visible).toBe(false);
-    const feedback=(await repo.analyticsData()).outbox.filter(e=>e.payload.kind==='feedback');expect(feedback).toHaveLength(1);
-    expect((await repo.load()).runs.find(r=>r.runId===sixth.runId)?.score).toBe(sixth.score);
+    await repo.answerSurvey(first.runId,null);await repo.answerSurvey(first.runId,5);
+    expect((await new RunRepository().prepareSurvey(first.runId)).state.status).toBe('skipped');
+    const second = run();await repo.saveRun(second,1);expect((await repo.prepareSurvey(second.runId)).visible).toBe(true);
+    await repo.answerSurvey(second.runId,5,'  รอบสอง  ');await repo.answerSurvey(second.runId,1,'replacement');
+    const saved = await new RunRepository().prepareSurvey(second.runId);
+    expect(saved.visible).toBe(false);expect(saved.state).toMatchObject({status:'submitted',rating:5,comment:'รอบสอง'});
+    const third=run();await repo.saveRun(third,1);expect((await repo.prepareSurvey(third.runId)).visible).toBe(true);
+    await repo.answerSurvey(third.runId,3);
+    const feedback=(await repo.analyticsData()).outbox.filter(e=>e.payload.kind==='feedback');expect(feedback).toHaveLength(2);
+    expect(feedback.map(e=>e.payload.kind==='feedback'?e.payload.contextRunId:'')).toEqual(expect.arrayContaining([second.runId,third.runId]));
+    expect(feedback.find(e=>e.payload.kind==='feedback'&&e.payload.contextRunId===second.runId)?.payload).toMatchObject({rating:5,comment:'รอบสอง',eligibleRunCount:2});
+    const sent:string[]=[];
+    const send=async(_url:RequestInfo|URL,init?:RequestInit)=>{
+      if(init?.method)sent.push(JSON.parse(String(init.body)).kind);
+      return Response.json(init?.method?{ok:true}:{enabled:true});
+    };
+    expect(await new AnalyticsSync(repo,send).flush()).toBe('synced');
+    expect(sent.filter(kind=>kind==='feedback')).toHaveLength(2);
+    expect((await repo.analyticsData()).outbox.every(e=>e.state==='synced')).toBe(true);
+    expect((await repo.load()).runs.find(r=>r.runId===second.runId)?.score).toBe(second.score);
   });
   it('upgrades v1 data without automatically uploading historical runs or counting them', async () => {
     const old = await new Promise<IDBDatabase>((resolve,reject)=>{const req=indexedDB.open('body-rush-learning-v1',1);
@@ -72,6 +80,20 @@ describe('local survey and atomic delivery queue', () => {
     const repo=new RunRepository();expect((await repo.load()).runs).toHaveLength(1);
     expect((await repo.analyticsData()).outbox).toEqual([]);expect((await repo.prepareSurvey(oldRun.runId)).visible).toBe(false);
     await repo.saveRun(oldRun,1);expect((await repo.analyticsData()).outbox).toEqual([]);
+  });
+  it('keeps v2 feedback queued and suppresses prompts on historical runs after upgrade', async () => {
+    const db=await new Promise<IDBDatabase>((resolve,reject)=>{const req=indexedDB.open('body-rush-learning-v1',2);
+      req.onupgradeneeded=()=>{req.result.createObjectStore('profiles',{keyPath:'playerId'});req.result.createObjectStore('runs',{keyPath:'runId'});req.result.createObjectStore('decks',{keyPath:'id'});req.result.createObjectStore('settings');
+        for(const name of ['analyticsIdentities','surveys','outbox'])req.result.createObjectStore(name,{keyPath:name==='outbox'?'id':'playerId'});};
+      req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+    const oldRun=run(),tx=db.transaction(['runs','surveys','outbox'],'readwrite');
+    tx.objectStore('runs').put(oldRun);
+    tx.objectStore('surveys').put({playerId:profile.playerId,eligibleCount:3,nextAsk:3,submitted:true,shownRunId:oldRun.runId,rating:4});
+    tx.objectStore('outbox').put({id:`feedback:${profile.playerId}`,playerId:profile.playerId,createdAt:1,attempts:0,nextAttemptAt:0,state:'pending',payload:{kind:'feedback',contextRunId:oldRun.runId,surveyVersion:'enjoyment-v1',rating:4,eligibleRunCount:3,occurredAt:oldRun.endedAt}});
+    await new Promise<void>(resolve=>{tx.oncomplete=()=>resolve();});db.close();
+    const repo=new RunRepository();expect((await repo.prepareSurvey(oldRun.runId)).state.status).toBe('historical');
+    expect((await repo.analyticsData()).outbox).toHaveLength(1);
+    const next=run();await repo.saveRun(next,1);expect((await repo.prepareSurvey(next.runId)).visible).toBe(true);
   });
   it('rejects invalid ratings and clears only the chosen player analytics', async () => {
     const repo=new RunRepository();await repo.saveRun(run(),1);const other={...run(),playerId:'other'};await repo.saveRun(other,1);
@@ -124,7 +146,7 @@ describe('delivery through the public synchronization boundary', () => {
   });
   it('retires previously queued events without sending them to cloud', async () => {
     const repo=new RunRepository(); const record=run(); await repo.saveRun(record,1);
-    const db=await new Promise<IDBDatabase>(resolve=>{const req=indexedDB.open('body-rush-learning-v1',2);req.onsuccess=()=>resolve(req.result);});
+    const db=await new Promise<IDBDatabase>(resolve=>{const req=indexedDB.open('body-rush-learning-v1',3);req.onsuccess=()=>resolve(req.result);});
     const tx=db.transaction('outbox','readwrite');
     tx.objectStore('outbox').put({id:'old-event',playerId:profile.playerId,createdAt:1,attempts:0,nextAttemptAt:0,state:'pending',payload:{kind:'event',eventId:crypto.randomUUID(),contextRunId:record.runId,surveyVersion:'enjoyment-v1',event:'shown',occurredAt:record.endedAt}});
     await new Promise<void>(resolve=>{tx.oncomplete=()=>resolve();});db.close();

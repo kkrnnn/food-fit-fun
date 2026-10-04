@@ -1,8 +1,8 @@
 import type { DeckState, Profile, QuestionBank, RunRecord } from '../../game/learning/types';
 import { parseBank } from '../../game/learning/QuestionDeck';
 import { validateProfile } from '../health/assessment';
-import { ANALYTICS_STORES, upgradeAnalytics, queueTerminal, newSurvey, entry } from './AnalyticsStore';
-import { SURVEY_INTERVAL, SURVEY_VERSION, normalizeFeedbackComment, type AnalyticsIdentity, type SurveyState, type OutboxEntry } from './cloudContract';
+import { ANALYTICS_STORES, RUN_SURVEY_STORE, upgradeAnalytics, queueTerminal, entry } from './AnalyticsStore';
+import { SURVEY_VERSION, normalizeFeedbackComment, type AnalyticsIdentity, type SurveyCounter, type SurveyState, type OutboxEntry } from './cloudContract';
 
 export interface StoredData { profiles: Profile[]; runs: RunRecord[]; bank: QuestionBank | null; }
 const DATABASE = 'body-rush-learning-v1';
@@ -20,14 +20,14 @@ export class RunRepository {
   private open(): Promise<IDBDatabase> {
     if (!this.database) this.database = new Promise((resolve, reject) => {
       if (!globalThis.indexedDB) { reject(new Error('อุปกรณ์นี้ไม่รองรับการบันทึก IndexedDB')); return; }
-      const req = indexedDB.open(this.databaseName, 2);
-      req.onupgradeneeded = () => {
+      const req = indexedDB.open(this.databaseName, 3);
+      req.onupgradeneeded = (event) => {
         const db = req.result;
         if (!db.objectStoreNames.contains('profiles')) db.createObjectStore('profiles', { keyPath: 'playerId' });
         if (!db.objectStoreNames.contains('runs')) db.createObjectStore('runs', { keyPath: 'runId' });
         if (!db.objectStoreNames.contains('decks')) db.createObjectStore('decks', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings');
-        upgradeAnalytics(db);
+        upgradeAnalytics(db, event.oldVersion, req.transaction!);
       };
       req.onsuccess = () => { req.result.onversionchange = () => { req.result.close(); this.database = null; }; resolve(req.result); };
       req.onerror = () => { this.database = null; reject(req.error); };
@@ -98,11 +98,11 @@ export class RunRepository {
     tx.objectStore('settings').put(bank, 'bank'); await done; return bank;
   }
   async clear(playerId?: string): Promise<void> {
-    const db = await this.open(); const tx = db.transaction(['profiles', 'runs', 'decks', 'settings', ...ANALYTICS_STORES], 'readwrite'); const done = complete(tx);
-    if (!playerId) ['profiles', 'runs', 'decks', 'settings', ...ANALYTICS_STORES].forEach(name => tx.objectStore(name).clear());
+    const db = await this.open(); const tx = db.transaction(['profiles', 'runs', 'decks', 'settings', ...ANALYTICS_STORES, RUN_SURVEY_STORE], 'readwrite'); const done = complete(tx);
+    if (!playerId) ['profiles', 'runs', 'decks', 'settings', ...ANALYTICS_STORES, RUN_SURVEY_STORE].forEach(name => tx.objectStore(name).clear());
     else {
       tx.objectStore('profiles').delete(playerId);
-      for (const name of ['runs', 'decks', ...ANALYTICS_STORES]) {
+      for (const name of ['runs', 'decks', ...ANALYTICS_STORES, RUN_SURVEY_STORE]) {
         const cursor = tx.objectStore(name).openCursor();
         cursor.onsuccess = () => { const c = cursor.result; if (!c) return; if (c.value.playerId === playerId) c.delete(); c.continue(); };
       }
@@ -110,31 +110,33 @@ export class RunRepository {
     await done;
   }
 
-  /** Opening/reloading the same result cannot double-count an impression. */
+  /** Each finished run may be answered once, regardless of earlier player feedback. */
   async prepareSurvey(runId: string): Promise<{ visible: boolean; state: SurveyState }> {
-    const db = await this.open(), tx = db.transaction(['runs', 'surveys', 'outbox'], 'readwrite'), done = complete(tx);
+    const db = await this.open(), tx = db.transaction(['runs', RUN_SURVEY_STORE], 'readonly'), done = complete(tx);
     const run = await request<RunRecord | undefined>(tx.objectStore('runs').get(runId));
     if (!run) { await done; throw new Error('รอบนี้ยังบันทึกไม่สำเร็จ กรุณาบันทึกผลก่อน'); }
-    const store = tx.objectStore('surveys');
-    const state = await request<SurveyState | undefined>(store.get(run.playerId)) ?? newSurvey(run.playerId);
-    const visible = !state.submitted && ['completed', 'game_over'].includes(run.outcome) && state.eligibleCount >= state.nextAsk;
-    if (visible && state.shownRunId !== runId) { state.shownRunId = runId; store.put(state); }
+    const state = await request<SurveyState | undefined>(tx.objectStore(RUN_SURVEY_STORE).get(runId))
+      ?? { runId, playerId: run.playerId, status: 'pending' };
+    const visible = state.status === 'pending' && ['completed', 'game_over'].includes(run.outcome);
     await done; return { visible, state };
   }
 
   async answerSurvey(runId: string, rating: number | null, comment?: string): Promise<void> {
     if (rating !== null && (!Number.isInteger(rating) || rating < 1 || rating > 5)) throw new Error('เลือกดาว 1–5');
     const normalizedComment = rating === null ? undefined : normalizeFeedbackComment(comment);
-    const db = await this.open(), tx = db.transaction(['runs', 'surveys', 'outbox'], 'readwrite'), done = complete(tx);
+    const db = await this.open(), tx = db.transaction(['runs', 'surveys', RUN_SURVEY_STORE, 'outbox'], 'readwrite'), done = complete(tx);
     const run = await request<RunRecord | undefined>(tx.objectStore('runs').get(runId));
     if (!run) { await done; throw new Error('ยังไม่มีผลรอบนี้ในเครื่อง'); }
-    const store = tx.objectStore('surveys'), state = await request<SurveyState | undefined>(store.get(run.playerId));
-    if (!state || state.submitted || state.shownRunId !== runId || state.eligibleCount < state.nextAsk) { await done; return; }
-    if (rating === null) { state.nextAsk = state.eligibleCount + SURVEY_INTERVAL; }
-    else {
-      state.submitted = true; state.rating = rating; state.comment = normalizedComment;
-      tx.objectStore('outbox').put(entry(`feedback:${run.playerId}`, run.playerId, { kind: 'feedback', contextRunId: runId,
-        surveyVersion: SURVEY_VERSION, rating, ...(normalizedComment ? { comment: normalizedComment } : {}), eligibleRunCount: state.eligibleCount, occurredAt: new Date().toISOString() }));
+    const store = tx.objectStore(RUN_SURVEY_STORE);
+    const prior = await request<SurveyState | undefined>(store.get(runId));
+    if (prior || !['completed', 'game_over'].includes(run.outcome)) { await done; return; }
+    const counter = await request<SurveyCounter | undefined>(tx.objectStore('surveys').get(run.playerId));
+    if (!counter?.eligibleCount) { await done; throw new Error('ยังไม่มีผลรอบนี้ในเครื่อง'); }
+    const state: SurveyState = { runId, playerId: run.playerId, status: rating === null ? 'skipped' : 'submitted' };
+    if (rating !== null) {
+      state.rating = rating; state.comment = normalizedComment;
+      tx.objectStore('outbox').put(entry(`feedback:${runId}`, run.playerId, { kind: 'feedback', contextRunId: runId,
+        surveyVersion: SURVEY_VERSION, rating, ...(normalizedComment ? { comment: normalizedComment } : {}), eligibleRunCount: counter.eligibleCount, occurredAt: new Date().toISOString() }));
     }
     store.put(state); await done;
   }

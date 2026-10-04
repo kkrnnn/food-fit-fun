@@ -13,7 +13,7 @@ export function FeedbackPanel({ runId, repository, waitForSave, onChange }: {
     let active = true;
     void waitForSave().then(() => repository.prepareSurvey(runId)).then(value => {
       if (active) { setSurvey(value); onChange(); }
-    }).catch(() => { if (active) setError('บันทึกผลรอบนี้ก่อน จึงจะเก็บดาวได้'); });
+    }).catch(() => { if (active) setError('บันทึกผลรอบนี้ก่อน จึงจะเก็บความคิดเห็นได้'); });
     return () => { active = false; };
   }, [runId, repository]);
   const answer = async (value: number | null) => {
@@ -23,9 +23,9 @@ export function FeedbackPanel({ runId, repository, waitForSave, onChange }: {
     finally { setBusy(false); }
   };
   if (error && !survey) return <p className="lr-error" role="alert">{error}</p>;
-  if (!survey?.visible) return survey?.state.submitted ? <p className="lr-feedback-thanks" role="status">ขอบคุณสำหรับ {survey.state.rating} ดาว! เก็บความคิดเห็นไว้แล้ว</p> : null;
+  if (!survey?.visible) return survey?.state.status === 'submitted' ? <p className="lr-feedback-thanks" role="status">ขอบคุณสำหรับ {survey.state.rating} ดาว! เก็บความคิดเห็นรอบนี้ไว้แล้ว</p> : null;
   return <section className="lr-enjoyment" aria-labelledby="enjoyment-title">
-    <p className="lr-kicker">ความรู้สึกหลังเล่น</p><h2 id="enjoyment-title">เล่นมาหลายรอบแล้ว เกมนี้สนุกไหม?</h2>
+    <p className="lr-kicker">ความรู้สึกหลังเล่น</p><h2 id="enjoyment-title">รอบนี้เล่นสนุกไหม?</h2>
     <fieldset disabled={busy}><legend>เลือก 1–5 ดาว</legend><div className="lr-rating">
       {labels.map((label, i) => <label key={label}><input type="radio" name={`enjoyment-${runId}`} value={i + 1} checked={rating === i + 1} onChange={() => setRating(i + 1)} aria-label={`${i + 1} ดาว · ${label}`} />
         <span className={rating >= i + 1 ? 'filled' : ''} aria-hidden="true">★</span></label>)}
@@ -38,7 +38,7 @@ export function FeedbackPanel({ runId, repository, waitForSave, onChange }: {
     </label>
     <small className="lr-comment-count" id={`feedback-comment-count-${runId}`}>{comment.length.toLocaleString('th-TH')} / 1,000 ตัวอักษร</small>
     <div className="lr-actions"><button disabled={!rating || busy} onClick={() => void answer(rating)}>{busy ? 'กำลังบันทึก…' : 'ส่งความคิดเห็น'}</button><button className="secondary" disabled={busy} onClick={() => void answer(null)}>ข้ามก่อน</button></div>
-    <small>ส่งแล้วจะไม่ถามอีกสำหรับผู้เล่นนี้ในเครื่อง · ดาวไม่เปลี่ยนคะแนนเกม</small>
+    <small>ส่งหรือข้ามได้หนึ่งครั้งต่อรอบ · รอบหน้าถามใหม่ · ดาวไม่เปลี่ยนคะแนนเกม</small>
     {error && <p className="lr-error" role="alert">{error}</p>}
   </section>;
 }

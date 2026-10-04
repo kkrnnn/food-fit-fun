@@ -1,15 +1,33 @@
 import type { RunRecord } from '../../game/learning/types';
-import { cloudRun, SURVEY_INTERVAL, type AnalyticsIdentity, type OutboxEntry, type SurveyState } from './cloudContract';
+import { cloudRun, type AnalyticsIdentity, type OutboxEntry, type SurveyCounter, type SurveyState } from './cloudContract';
 
 export const ANALYTICS_STORES = ['analyticsIdentities', 'surveys', 'outbox'] as const;
-export function upgradeAnalytics(db: IDBDatabase) {
+export const RUN_SURVEY_STORE = 'runSurveys';
+export function upgradeAnalytics(db: IDBDatabase, oldVersion: number, tx: IDBTransaction) {
   for (const name of ANALYTICS_STORES) if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: name === 'outbox' ? 'id' : 'playerId' });
+  if (!db.objectStoreNames.contains(RUN_SURVEY_STORE)) {
+    const decisions = db.createObjectStore(RUN_SURVEY_STORE, { keyPath: 'runId' });
+    decisions.createIndex('playerId', 'playerId');
+    if (oldVersion > 0) {
+      // Existing terminal results predate per-run prompting. Do not reopen them after upgrade.
+      const cursor = tx.objectStore('runs').openCursor();
+      cursor.onsuccess = () => {
+        const row = cursor.result; if (!row) return;
+        const run = row.value as RunRecord;
+        if (['completed', 'game_over'].includes(run.outcome)) {
+          const state: SurveyState = { runId: run.runId, playerId: run.playerId, status: 'historical' };
+          decisions.put(state);
+        }
+        row.continue();
+      };
+    }
+  }
 }
 export function entry(id: string, playerId: string, payload: OutboxEntry['payload']): OutboxEntry {
   return { id, playerId, payload, createdAt: Date.now(), attempts: 0, nextAttemptAt: 0, state: 'pending' };
 }
-export function newSurvey(playerId: string): SurveyState {
-  return { playerId, eligibleCount: 0, nextAsk: SURVEY_INTERVAL, submitted: false };
+export function newSurvey(playerId: string): SurveyCounter {
+  return { playerId, eligibleCount: 0 };
 }
 export function identity(tx: IDBTransaction, playerId: string, callback: (value: AnalyticsIdentity) => void) {
   const store = tx.objectStore('analyticsIdentities'), req = store.get(playerId);
@@ -27,6 +45,6 @@ export function queueTerminal(tx: IDBTransaction, record: RunRecord, prior?: Run
     tx.objectStore('outbox').put(entry(`run:${record.runId}`, record.playerId, { kind: 'run', run: cloudRun(record) }));
     if (!['completed', 'game_over'].includes(record.outcome)) return;
     const store = tx.objectStore('surveys'), req = store.get(record.playerId);
-    req.onsuccess = () => { const state: SurveyState = req.result ?? newSurvey(record.playerId); state.eligibleCount++; store.put(state); };
+    req.onsuccess = () => { const state: SurveyCounter = req.result ?? newSurvey(record.playerId); state.eligibleCount++; store.put(state); };
   });
 }

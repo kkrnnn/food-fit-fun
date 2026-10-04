@@ -1,8 +1,8 @@
 # Supabase: feedback + score
 
-สถานะ 2026-10-03: ลบตารางเดิมและข้อมูลเดิมตามที่ผู้ใช้สั่งแล้ว ตารางข้อมูลเกมใน public เหลือ `score` กับ `feedback`. Baseline version `20261003000100` และ comment migration `20261003000200` ลงทะเบียนใน `supabase_migrations.schema_migrations` ซึ่งเป็น metadata schema แยกจากข้อมูลเกม
+สถานะ 2026-10-04: ตารางข้อมูลเกมใน public มี `score` กับ `feedback`. Baseline version `20261003000100`, comment migration `20261003000200` และ migration เก็บ feedback ทุกรอบ `20261004000100` ลงทะเบียนใน `supabase_migrations.schema_migrations` ซึ่งเป็น metadata schema แยกจากข้อมูลเกม
 
-[Supabase project](https://supabase.com/dashboard/project/umsquyyfozhggogfnrak) · [เกม Food Fit Fun](https://food-fit-fun.vercel.app) · [Production deployment](https://vercel.com/dream-league1/food-fit-fun/6938HZbGKYKYCqFGEt1yMY6UkejM)
+[Supabase project](https://supabase.com/dashboard/project/umsquyyfozhggogfnrak) · [เกม Food Fit Fun](https://food-fit-fun.vercel.app) · [Production deployment](https://vercel.com/dream-league1/food-fit-fun/6SrMX5xaU1L5W7Pcf3bnKriWdzwD)
 
 ## สองตาราง
 
@@ -10,7 +10,7 @@
 
 ชื่อ/เพศ/อายุ snapshot ตอนเริ่มรอบ. BMI ตอนจบไม่ใช่การวัดร่างกายใหม่. ไม่ส่งส่วนสูง น้ำหนัก ภาพกล้อง หรือคำตอบรายข้อไป cloud; คำตอบละเอียดเก็บ local. ข้อมูล local เก่าที่ไม่มี snapshot จะเป็น NULL ไม่คาดเดาจากโปรไฟล์ปัจจุบัน
 
-`feedback`: player_id, score_id, created_at และ JSONB `data` เช่น `{"player_name":"ผู้เล่น A","stars":4,"comment":"อยากได้ด่านเพิ่ม"}`. comment เป็นตัวเลือก จำกัด 1,000 ตัวอักษร ตัดช่องว่างหัวท้ายและไม่เก็บถ้าว่าง. คนละหนึ่งครั้ง เก็บเฉพาะคนส่งดาว ไม่มี shown/skip/answer tables หรือ report views เพิ่มเติม
+`feedback`: player_id, score_id, created_at และ JSONB `data` เช่น `{"player_name":"ผู้เล่น A","stars":4,"comment":"อยากได้ด่านเพิ่ม"}`. comment เป็นตัวเลือก จำกัด 1,000 ตัวอักษร ตัดช่องว่างหัวท้ายและไม่เก็บถ้าว่าง. เก็บหนึ่งครั้งต่อรอบที่จบหรือแพ้ ผู้เล่นคนเดิมส่งได้หลายรอบ ไม่มี shown/skip/answer tables หรือ report views เพิ่มเติม
 
 ## Migration version
 
@@ -29,6 +29,8 @@ Project ว่างที่ใช้ SQL Editor: รัน baseline แล้�
 
 Comment migration: `supabase/migrations/20261003000200_feedback_comment.sql` ปรับ constraint JSONB และ RPC โดยคงแถวเดิมไว้. Applied บน project นี้แล้ว. หากรันผ่าน SQL Editor ให้ตามด้วย `supabase/register-feedback-comment.sql`; CLI db push บันทึก version ให้อัตโนมัติ
 
+Per-run migration: `supabase/migrations/20261004000100_feedback_every_run.sql` เปลี่ยน primary key ของ feedback เป็น `score_id` และเพิ่ม index ที่ `player_id` โดยคงแถวเดิมไว้. Applied บน project นี้แล้ว. หากรันผ่าน SQL Editor ให้ตามด้วย `supabase/register-feedback-every-run.sql`; CLI db push บันทึก version ให้อัตโนมัติ
+
 ## Reset แยกไฟล์
 
 `supabase/reset-analytics.sql` ลบตารางและข้อมูลเกม ใช้เฉพาะเมื่อผู้ใช้สั่ง reset ชัดเจน จากนั้นรัน baseline. ไม่อยู่ใน migrations ไม่เรียกตอน deploy ปกติ และไม่แตะ auth/storage/system schemas
@@ -39,8 +41,8 @@ API เดิม `/api/analytics/runs` และ `/api/analytics/feedback` ใ�
 
 Server env บน Vercel Production/Preview: SUPABASE_URL, SUPABASE_SECRET_KEY, ANALYTICS_HASH_SECRET, ANALYTICS_ORIGINS, ANALYTICS_ENABLED=true. Key/hash เป็น Secret ไม่ใช้ VITE_ prefix. เปลี่ยน env ต้อง redeploy; `.env.local` ถูก gitignore และไม่ sync อัตโนมัติ
 
-ถามดาวหลังจบ/แพ้ในเครื่องครบ 3 รอบรวม demo; skip เว้นอีก 3; submitted แล้วไม่ถามอีก. กฎอยู่ local และยังใช้ได้หลัง cloud reset จึงไม่บังคับให้ cloud มี 3 รอบย้อนหลัง. Reset cloud ไม่ล้าง profile/history/สถานะดาวในเครื่อง
+ถามดาวและคอมเมนต์หลังจบ/แพ้ทุกรอบรวม demo; ข้ามหรือส่งแล้วไม่ถามซ้ำในรอบเดิม แต่ถามใหม่ในรอบถัดไป. ผลรอบเก่าก่อนอัปเดตถูกทำเครื่องหมาย historical จึงไม่ถามย้อนหลัง. สถานะอยู่ local และยังใช้ได้หลัง cloud reset. Reset cloud ไม่ล้าง profile/history/สถานะ feedback ในเครื่อง
 
 ## รายงาน / export
 
-ใช้ SELECT ใน `supabase/analytics-queries.sql` เพื่อ export ข้อมูลผลเล่นโดยไม่รวม token_hash. กรอง demo/content/date ก่อนวิเคราะห์. ไม่มี response-rate denominator จาก shown events. ปุ่มล้างในเกมล้างเฉพาะ local; ยังไม่มี automatic retention/delete schedule. ดู [QA](../qa/two-table-analytics-verification.md)
+ใช้ SELECT ใน `supabase/analytics-queries.sql` เพื่อ export ข้อมูลผลเล่นโดยไม่รวม token_hash. กรอง demo/content/date ก่อนวิเคราะห์. รายงานดาวนับทั้งจำนวนคำตอบและจำนวนผู้เล่นไม่ซ้ำ. ไม่มี response-rate denominator จาก shown events. ปุ่มล้างในเกมล้างเฉพาะ local; ยังไม่มี automatic retention/delete schedule. ดู [QA](../qa/feedback-every-run-verification.md)

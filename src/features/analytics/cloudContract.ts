@@ -1,13 +1,10 @@
 import type { RunRecord, Profile } from '../../game/learning/types';
 
 export const SURVEY_VERSION = 'enjoyment-v1';
-export const SURVEY_INTERVAL = 3;
 export const FEEDBACK_COMMENT_LIMIT = 1000;
 export interface AnalyticsIdentity { playerId: string; analyticsPlayerId: string; token: string; }
-export interface SurveyState {
-  playerId: string; eligibleCount: number; nextAsk: number; submitted: boolean;
-  shownRunId?: string; rating?: number; comment?: string;
-}
+export interface SurveyCounter { playerId: string; eligibleCount: number; }
+export interface SurveyState { runId: string; playerId: string; status: 'pending' | 'submitted' | 'skipped' | 'historical'; rating?: number; comment?: string; }
 export interface CloudRun {
   runId: string; startedAt: string; endedAt?: string; outcome: Exclude<RunRecord['outcome'], 'in_progress'>;
   playerName: string | null; sex: Profile['sex'] | null; ageYears: number;
@@ -54,7 +51,7 @@ export function validatePayload(input: unknown): CloudPayload {
     const common = { contextRunId: uuid(p.contextRunId), surveyVersion: choice(p.surveyVersion, [SURVEY_VERSION]), occurredAt: time(p.occurredAt) };
     if (p.kind === 'event') return { ...common, kind: 'event', eventId: uuid(p.eventId), event: choice(p.event, ['shown', 'skipped']) };
     const rating = num(p.rating, 5, true); if (rating < 1) fail();
-    const eligibleRunCount = num(p.eligibleRunCount, 1_000_000, true); if (eligibleRunCount < SURVEY_INTERVAL) fail();
+    const eligibleRunCount = num(p.eligibleRunCount, 1_000_000, true); if (eligibleRunCount < 1) fail();
     const comment = normalizeFeedbackComment(p.comment);
     return { ...common, kind: 'feedback', rating, ...(comment ? { comment } : {}), eligibleRunCount };
   }
