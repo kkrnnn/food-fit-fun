@@ -62,3 +62,7 @@ Applied migration `20261004000300_exercise_energy.sql` และลงทะเ�
 Regression `npm test -- src/game/three/PickupFollowing.test.ts --maxWorkers=2` เรียก learningPickup จริง เปลี่ยนตำแหน่ง runner แล้วเรียก frame updater จริง ก่อนแก้ล้มทั้ง 3 tests เพราะ burst.x ยังคง 0 เมื่อ runner.x เปลี่ยนเป็น ±2.4 หลังแก้ผ่านครบ รวมแนวตั้งและ reduced motion; full suite/build ผ่านตามจำนวนล่าสุดข้างต้น ตรวจเกมด้วยปุ่ม Right/Left และเห็นวงพร้อม `+80 kcal` อยู่ที่ตัวละครหลังย้ายกลับกลาง [ภาพล่าสุด](kcal-following-smaller.jpg)
 
 ผู้ใช้อนุมัติ commit, push และ deploy Vercel production ชัดเจนวันที่ 4 ตุลาคม 2026 ตรวจซ้ำ full suite 29 files / 156 tests, build และ diff check ผ่าน พร้อม migration บน live ก่อน deploy สถานะ release และหลักฐาน production จะบันทึกหลังยืนยัน Ready/alias/API และตรวจหน้าเว็บจริง
+
+### Native Node API regression
+
+Commit `b88c3ad` push ไป origin/master แล้ว deployment แรกขึ้น Ready แต่ GET `/api/analytics/runs` คืน 500 (`FUNCTION_INVOCATION_FAILED`). Runtime log ระบุ `ERR_MODULE_NOT_FOUND` จาก extensionless assessment import ของ energy.js. เพิ่ม `npm run test:runtime` ให้ compile entry points จริงและโหลดด้วย native Node ซึ่งล้มด้วยข้อความเดียวกันก่อนแก้ และผ่านหลังแก้. แยก profileValidation ที่ไม่มี BMI JSON, คง re-export เดิมของ assessment และใช้ `.js` สำหรับ runtime imports ใน energy/ExerciseEnergy. Full suite 156 tests และ production build ผ่านหลังแก้.

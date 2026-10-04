@@ -1,6 +1,6 @@
-import { isExercise, type ItemType } from './ItemCatalog';
+import { isExercise, type ItemType } from './ItemCatalog.js';
 import type { Profile } from './types';
-import { validateProfile } from '../../features/health/assessment';
+import { validateProfile } from '../../features/health/profileValidation.js';
 
 export const EXERCISE_MODEL_VERSION = 'nccor-youth+adult-met-gross-1min-v1';
 export const LEGACY_EXERCISE_MODEL_VERSION = 'exercise-game-30kcal-v1';

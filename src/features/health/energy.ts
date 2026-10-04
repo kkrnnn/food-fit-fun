@@ -1,5 +1,5 @@
 import type { Profile } from '../../game/learning/types';
-import { validateProfile } from './assessment';
+import { validateProfile } from './profileValidation.js';
 
 export const ENERGY_MODEL_VERSION = 'dri2023-inactive-3plus-v1';
 export const ENERGY_SOURCE = 'https://www.canada.ca/en/health-canada/services/food-nutrition/healthy-eating/dietary-reference-intakes/tables/equations-estimate-energy-requirement.html';
