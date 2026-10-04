@@ -28,18 +28,19 @@ function approach(leadSeconds: number, mode: InputMode = 'camera') {
 }
 function pose(rise = 0): PoseLandmark[] {
   const points = Array.from({ length: 33 }, () => ({ x: .5, y: .7, visibility: 1, presence: 1 }));
+  points[0].y = .2 - rise;
   for (const index of [11, 12]) points[index].y = .4 - rise;
   for (const index of [23, 24]) points[index].y = .7 - rise;
   return points;
 }
 
 describe('camera jump to exercise pickup timing', () => {
-  it.each([.9, .05])('accepts a physical jump %ss before the item with a 125ms pose delay', lead => {
+  it.each([.9, .05])('accepts a head-target jump %ss before the item with a 125ms pose delay', lead => {
     const { run, item } = approach(lead);
     const detector = new JumpGesture();
     const now = run.snapshot().record.activePlayMs;
     for (let offset = -500; offset <= 0; offset += 125) expect(detector.ingest(pose(), now + offset, true)).toBe(false);
-    // The camera delivers the raised torso on the next pose frame.
+    // The camera delivers the raised head on the next pose frame.
     run.advance(.125);
     expect(detector.ingest(pose(.05), now + 125, true)).toBe(true);
     expect(run.jump()).toBe(true);

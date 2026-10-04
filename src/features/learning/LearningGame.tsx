@@ -4,7 +4,11 @@ import { CameraSession } from '../../game/camera/CameraSession';
 import { PoseMapper, type PoseOutput } from '../../game/camera/PoseMapper';
 import { readCameraTuning, saveCameraTuning, type CameraTuning } from '../../game/camera/CameraTuning';
 import type { Lighting } from '../../game/camera/FrameProcessing';
-import { CameraPreview, CameraTuningControls, CameraProblemDialog } from './CameraSetup';
+import { CameraPreview, CameraTuningControls, CameraProblemDialog, CameraCalibrationDialog } from './CameraSetup';
+import { CameraCalibration } from '../../game/camera/CameraCalibration';
+import { torsoSample } from '../../game/camera/TorsoPose';
+import { headSample } from '../../game/camera/HeadPose';
+import { AdaptiveQuality } from '../../game/three/AdaptiveQuality';
 import { RunSession, LEVEL_DISTANCE, COURSE_SPEED } from '../../game/learning/RunSession';
 import { createQuestionSet, DEMO_BANK } from '../../game/learning/QuestionDeck';
 import type { InputMode, Lane, Profile, Snapshot } from '../../game/learning/types';
@@ -49,15 +53,26 @@ export function LearningGame() {
   const floatingCameraHost = useRef<HTMLDivElement>(null);
   const setupCameraHost = useRef<HTMLDivElement>(null);
   const problemCameraHost = useRef<HTMLDivElement>(null);
+  const calibrationCameraHost = useRef<HTMLDivElement>(null);
+  const calibration = useRef(new CameraCalibration());
+  const [calibrationView, setCalibrationView] = useState(() => calibration.current.view);
+  const [calibrationOpen, setCalibrationOpen] = useState(false);
+  const calibrationOpenRef = useRef(false);
+  calibrationOpenRef.current = calibrationOpen;
+  const calibrationReturnSettings = useRef(false);
+  const cameraVerified = useRef(false);
   const [cameraPreview, setCameraPreview] = useState<PoseOutput | null>(null);
   const [cameraLighting, setCameraLighting] = useState<Lighting | null>(null);
   const [cameraJumped, setCameraJumped] = useState(false);
+  const [cameraTarget, setCameraTarget] = useState<{x:number;bodyY:number;targetY:number;touched:boolean} | null>(null);
   const jumpFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPreviewAt = useRef(-Infinity);
+  const lastJumpPreview = useRef(-Infinity);
   const generation = useRef(0);
   const modeRef = useRef<InputMode>(savedInputMode());
   const swipeStart = useRef<{ id: number; x: number; y: number; time: number } | null>(null);
   const cameraValid = useRef(false);
+  const cameraHeadValid = useRef(false);
   const cameraCalibrated = useRef(false);
   const lastPose = useRef(-Infinity);
   const countdownRef = useRef(0);
@@ -76,6 +91,8 @@ export function LearningGame() {
   const [quality, setQuality] = useState<GraphicsQuality>(() => {
     try { const value = localStorage.getItem('body-rush-graphics-quality'); return value === 'low' || value === 'high' ? value : 'medium'; } catch { return 'medium'; }
   });
+  const frameBudget = useRef(new AdaptiveQuality(quality));
+  const performanceActive = useRef(false);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [pickups, setPickups] = useState<{ id: string; label: string }[]>([]);
   useEffect(() => {
@@ -119,18 +136,23 @@ export function LearningGame() {
   const startPending = useRef(false);
   const terminalDelay = useRef(0);
   const recovery = useRef(new CameraRecovery());
+  const cameraGameplayActive = ['run', 'warmup'].includes(screen) || recovery.current.active;
+  const cameraGameplayActiveRef = useRef(cameraGameplayActive);
+  cameraGameplayActiveRef.current = cameraGameplayActive;
+  const showCameraProblem = !!cameraProblem && cameraGameplayActive && !calibrationOpen;
+  performanceActive.current = mode === 'camera' && ['run', 'warmup'].includes(screen) && !snapshot?.paused && !calibrationOpen && !settingsOpen && !cameraProblem && !countdown;
   const tutorialCheckpoint = useRef('');
   const countdownSound = useRef(0);
   const canHoldRef = useRef(false);
   const blockTorsoJump = useRef(false);
-  const canHold = mode === 'camera' && !introOpen && !busy && !deletePlayer && (cameraProblem ? cameraReady : settingsOpen ? cameraReady : screen === 'armed');
-  blockTorsoJump.current = !!cameraProblem || (screen === 'armed' && !settingsOpen);
+  const canHold = mode === 'camera' && !introOpen && !busy && !deletePlayer && (calibrationOpen || showCameraProblem || settingsOpen ? cameraReady : screen === 'armed' && cameraReady);
+  blockTorsoJump.current = calibrationOpen || !!cameraProblem || settingsOpen || (screen === 'armed' && !settingsOpen);
 
 
   useEffect(() => {
     const modal = modalRef.current;
     const content = contentRef.current;
-    if (content) content.inert = introOpen || settingsOpen || !!cameraProblem;
+    if (content) content.inert = introOpen || settingsOpen || showCameraProblem || calibrationOpen;
     if (!modal) return;
     const previous = document.activeElement as HTMLElement | null;
     const controls = () => Array.from(modal.querySelectorAll<HTMLElement>('button:not(:disabled), input, select, a[href]'));
@@ -144,7 +166,7 @@ export function LearningGame() {
     };
     modal.addEventListener('keydown', trap);
     return () => { modal.removeEventListener('keydown', trap); previous?.focus(); if (content) content.inert = false; };
-  }, [introOpen, settingsOpen, !!cameraProblem]);
+  }, [introOpen, settingsOpen, showCameraProblem, calibrationOpen]);
 
   canHoldRef.current = canHold;
 
@@ -164,14 +186,16 @@ export function LearningGame() {
     generation.current++; cameraRef.current?.stop(); cameraRef.current = null;
     cameraValid.current = false; cameraCalibrated.current = false; mapper.current.reset();
     setCameraReady(false); setCameraOn(false); setCameraStatus('กล้องยังไม่เปิด');
-    setCameraPreview(null); setCameraLighting(null); setCameraJumped(false);
+    setCameraPreview(null); setCameraLighting(null); setCameraJumped(false); setCameraTarget(null);
+    lastJumpPreview.current = -Infinity;
     if (jumpFeedbackTimer.current !== null) clearTimeout(jumpFeedbackTimer.current);
   };
   const saveProgress = (s: Snapshot) => {
     if (sessionOnly) return;
+    const record = structuredClone(s.record);
     const displayed = Math.max(s.record.answers.length, s.phase === 'quiz_approach' ? s.questionIndex + 1 : 0);
-    writeQueue.current = writeQueue.current.catch(() => {}).then(() => repository.current.saveRun(s.record, displayed)).then(() => {
-      if (s.record.outcome !== 'in_progress') void syncAnalytics();
+    writeQueue.current = writeQueue.current.catch(() => {}).then(() => repository.current.saveRun(record, displayed)).then(() => {
+      if (record.outcome !== 'in_progress') void syncAnalytics();
     }).catch(() => {
       setStorageError(true); setNotice('เล่นได้ แต่บันทึกผลไม่สำเร็จ กรุณาลองบันทึกอีกครั้ง');
     });
@@ -184,7 +208,7 @@ export function LearningGame() {
       countdownRef.current=0;setCountdown(0);countdownSound.current=0;
       cameraValid.current=false;cameraCalibrated.current=false;setCameraReady(false);setHoldProgress(0);
       warmup.current?.setControlValid(false);
-      setPauseReason(reason);setCameraStatus('ยืนนิ่งตรงกลาง ให้เห็นไหล่ถึงเอว 1.5 วินาที');
+      setPauseReason(reason);setCameraStatus('ยืนนิ่งตรงกลาง ให้เห็นศีรษะถึงเอว 1.5 วินาที');
       setScreen('armed');audio.current?.quiet();
       setCameraProblem(reason); setSettingsOpen(false);
       return;
@@ -209,70 +233,98 @@ export function LearningGame() {
     if (next === 'camera') sessionRef.current?.invalidateControl();
   };
   jumpRef.current = () => {
-    if (!['run','warmup'].includes(screen) || countdownRef.current || settingsOpen || cameraProblem || document.hidden) return;
+    if (!['run','warmup'].includes(screen) || countdownRef.current || settingsOpen || calibrationOpen || cameraProblem || document.hidden) return;
     const accepted=warmup.current ? warmup.current.jump() : sessionRef.current?.jump();
     if(accepted) audio.current?.cue('confirm');
   };
   const beginCamera = () => {
     void audio.current?.unlock();
     if (!videoRef.current) return;
-    jumpDetector.current.reset();
+    if (cameraGameplayActiveRef.current && !recovery.current.active) pause('ตั้งกล้องใหม่ก่อนเล่นต่อ', true);
+    calibrationReturnSettings.current = settingsOpen;
+    calibration.current.reset(); setCalibrationView(calibration.current.view); cameraVerified.current = false;
+    jumpDetector.current.setCalibration(null); hold.current.reset(); setHoldProgress(0);
     stopCamera(); chooseMode('camera');
+    setCameraProblem(null); setSettingsOpen(false); setCalibrationOpen(true); calibrationOpenRef.current = true;
     const id = ++generation.current; setCameraOn(true);
     const camera = new CameraSession({
       onPhase: (phase, message) => {
         if (id !== generation.current) return;
-        setCameraStatus(message || (phase === 'active' ? 'ยืนนิ่งตรงกลาง ให้เห็นไหล่ถึงเอว 1.5 วินาที' : 'กล้องยังไม่พร้อม'));
+        setCameraStatus(message || (phase === 'active' ? 'ยืนนิ่งตรงกลาง ให้เห็นศีรษะถึงเอว 1.5 วินาที' : 'กล้องยังไม่พร้อม'));
         if (phase === 'error') {
           cameraValid.current = false; setCameraReady(false); setCameraOn(false); setCameraPreview(null);
-          setCameraProblem(message || 'กล้องหยุดทำงาน'); setSettingsOpen(false);
-          pause(message || 'กล้องหยุดทำงาน', true);
+          if (cameraGameplayActiveRef.current && !calibrationOpenRef.current) {
+            setCameraProblem(message || 'กล้องหยุดทำงาน'); setSettingsOpen(false);
+            pause(message || 'กล้องหยุดทำงาน', true);
+          }
         }
       },
       onPose: (landmarks, time) => {
         if (id !== generation.current || document.hidden) return;
         lastPose.current = performance.now();
+        cameraHeadValid.current = !!headSample(landmarks);
         const output = mapper.current.ingest(landmarks, time, performance.now());
+        if (!calibrationOpenRef.current && cameraVerified.current && output.calibrated && !cameraCalibrated.current) {
+          const neutral = torsoSample(landmarks), head = headSample(landmarks), previous = calibration.current.profile;
+          if (neutral && head && previous) jumpDetector.current.setCalibration({ head: head.y, height: neutral.height, threshold: previous.jump.threshold });
+        }
+        let setupJumped = false;
+        if (calibrationOpenRef.current) {
+          const view = calibration.current.ingest(landmarks, output, time);
+          const configured = calibration.current.profile;
+          if (configured && !cameraVerified.current) {
+            mapper.current.setLaneCalibration(configured.lanes); jumpDetector.current.setCalibration(configured.jump);
+            cameraVerified.current = true; hold.current.reset();
+          }
+          if (configured) view.boundaries = mapper.current.laneBoundaries;
+          setupJumped = view.jumpPulse;
+          setCalibrationView(view);
+        }
         poseRef.current(output);
         const now = performance.now();
-        const jumped = jumpDetector.current.ingest(landmarks, now, output.calibrated && output.trackingValid && !output.trackingLost && !blockTorsoJump.current && !countdownRef.current);
+        const jumped = setupJumped || jumpDetector.current.ingest(landmarks, time, cameraVerified.current && output.calibrated && output.trackingValid && !output.trackingLost && !blockTorsoJump.current && !countdownRef.current);
         if (jumped) {
+          lastJumpPreview.current = now;
           setCameraJumped(true);
           if (jumpFeedbackTimer.current !== null) clearTimeout(jumpFeedbackTimer.current);
-          jumpFeedbackTimer.current = setTimeout(() => setCameraJumped(false), 700);
-          jumpRef.current();
+          jumpFeedbackTimer.current = setTimeout(() => {setCameraJumped(false);setCameraTarget(current=>current?{...current,touched:false}:null);}, 700);
+          if (!calibrationOpenRef.current) jumpRef.current();
         }
         if (now - lastPreviewAt.current >= 100 || jumped) {
           lastPreviewAt.current = now;
           setCameraPreview(output);
+          const head = headSample(landmarks), targetY = jumpDetector.current.targetY;
+          setCameraTarget(cameraVerified.current && head && targetY !== null && output.trackingValid && !output.trackingLost ? {x:1-head.x,bodyY:head.y,targetY,touched:jumped || now-lastJumpPreview.current <700} : null);
         }
         const h = hold.current.ingest(landmarks, performance.now(), canHoldRef.current && output.calibrated && output.trackingValid && !output.trackingLost);
         setHoldProgress(h.progress);
         if (h.completed) { audio.current?.cue('hold'); startRef.current(); }
       },
-      onInterrupted: message => { if (id === generation.current) pause(message, true); },
+      onInterrupted: message => { if (id === generation.current && !calibrationOpenRef.current) pause(message, true); },
       onLighting: lighting => { if (id === generation.current) setCameraLighting(lighting); },
     });
     cameraRef.current = camera; void camera.start(videoRef.current);
   };
   poseRef.current = output => {
-    const valid = output.calibrated && output.trackingValid && !output.trackingLost;
+    const valid = cameraVerified.current && cameraHeadValid.current && output.calibrated && output.trackingValid && !output.trackingLost;
     cameraValid.current = valid; cameraCalibrated.current = output.calibrated;
     setCameraReady(valid);
     if (valid && output.lane !== undefined) {
       setDetectedLane(output.lane);
-      if (!settingsOpen && !cameraProblem) { warmup.current?.setLane(output.lane, true); sessionRef.current?.setLane(output.lane, true); }
+      if (!settingsOpen && !calibrationOpen && !cameraProblem) { warmup.current?.setLane(output.lane, true); sessionRef.current?.setLane(output.lane, true); }
       setCameraStatus('กล้องพร้อมใช้งาน');
     } else {
-      if (!settingsOpen && !cameraProblem) { warmup.current?.setLane(detectedLane, false); sessionRef.current?.invalidateControl(); }
-      if (output.setupHint === 'show-upper-body') setCameraStatus('ให้เห็นไหล่ถึงเอว และกลับมาตรงกลาง');
+      if (!settingsOpen && !calibrationOpen && !cameraProblem) { warmup.current?.setLane(detectedLane, false); sessionRef.current?.invalidateControl(); }
+      if (output.setupHint === 'show-upper-body') setCameraStatus('ให้เห็นศีรษะถึงเอว และกลับมาตรงกลาง');
       else if (output.setupHint === 'stand-still') setCameraStatus('อยู่นิ่งตรงกลางอีกนิด เพื่อตั้งท่าให้ตรง');
       else if (!output.calibrated) setCameraStatus('ยืนนิ่งตรงกลาง 1.5 วินาที เพื่อตั้งท่ากลาง');
+      if (!cameraHeadValid.current) setCameraStatus('ให้เห็นใบหน้าและศีรษะในภาพ แล้วหันเข้าหากล้อง');
     }
     // Hold-start is isolated from gameplay and legacy jump pulses.
-    if (output.trackingLost && !settingsOpen && !cameraProblem) {
-      if (sessionRef.current) pause('จับท่าหลุด กลับมาให้เห็นไหล่ถึงเอว หรือใช้ปุ่มแทน', true);
-      else if (output.calibrated) setCameraProblem('จับท่าหลุด กลับมาให้เห็นไหล่ถึงเอว');
+    if ((output.trackingLost || (cameraVerified.current && !cameraHeadValid.current)) && cameraGameplayActive && !settingsOpen && !calibrationOpen && !cameraProblem) {
+      const reason = cameraHeadValid.current ? 'จับท่าหลุด กลับมาให้เห็นศีรษะถึงเอว หรือใช้ปุ่มแทน' : 'ไม่เห็นจุดศีรษะ หันหน้าเข้าหากล้องให้เห็นศีรษะถึงเอว';
+      if (sessionRef.current) pause(reason, true);
+      else if (output.calibrated) setCameraProblem(reason);
     }
   };
   const tuneCamera = (next: CameraTuning) => {
@@ -286,6 +338,18 @@ export function LearningGame() {
     setCameraReady(false); setHoldProgress(0); setCameraJumped(false);
     setCameraPreview(null);
     setCameraStatus('ยืนนิ่งตรงกลาง 1.5 วินาที เพื่อตั้งท่ากลาง');
+  };
+  const resetCalibration = () => {
+    mapper.current.reset(); calibration.current.reset(); setCalibrationView(calibration.current.view);
+    cameraVerified.current = false; jumpDetector.current.setCalibration(null); hold.current.reset();
+    cameraValid.current = false; setCameraReady(false); setHoldProgress(0); setCameraPreview(null); setCameraJumped(false);
+    setCameraStatus('ยืนตรงกลางให้นิ่ง ให้เห็นศีรษะถึงเอว');
+  };
+  const confirmCalibration = () => {
+    if (!cameraValid.current || !calibration.current.profile) return;
+    hold.current.reset(); setHoldProgress(0); setCalibrationOpen(false); calibrationOpenRef.current = false;
+    if (recovery.current.active) void start(activeProfile.current ?? undefined);
+    else setSettingsOpen(calibrationReturnSettings.current);
   };
 
   useEffect(() => {
@@ -306,7 +370,13 @@ export function LearningGame() {
     try { if (sceneRef.current) { engineRef.current = new GameEngine3D(sceneRef.current); engineRef.current.setGraphicsQuality(quality); } }
     catch { setSceneError('เปิดฉาก 3D ไม่สำเร็จ กรุณาเปิด WebGL หรือใช้เบราว์เซอร์ที่รองรับ'); }
     const loop = (now: number) => {
-      const dt = Math.min(.5, Math.max(0, (now - last) / 1000)); last = now;
+      const frameMs = now - last;
+      const dt = Math.min(.5, Math.max(0, frameMs / 1000)); last = now;
+      const budget = frameBudget.current.observe(frameMs, now, performanceActive.current && !document.hidden);
+      if (engineRef.current) {
+        engineRef.current.learningMaxFps = budget.fps;
+        if (engineRef.current.graphicsQuality !== budget.quality) engineRef.current.setGraphicsQuality(budget.quality);
+      }
       tickRef.current(dt); frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
@@ -337,25 +407,25 @@ export function LearningGame() {
     else { const h = hold.current.tick(performance.now()); if (h.progress !== holdProgress) setHoldProgress(h.progress); }
     if (modeRef.current === 'camera' && cameraRef.current?.isActive) {
       const now = performance.now();
-      if (now - lastPose.current > 250) { cameraValid.current = false; setCameraReady(false); session?.invalidateControl(); warmup.current?.setLane(detectedLane,false); }
+      if (now - lastPose.current > 250) { cameraValid.current = false; setCameraReady(false); if (!calibrationOpen) { session?.invalidateControl(); warmup.current?.setLane(detectedLane,false); } }
       const tick = mapper.current.tick(now);
       if (now - lastPose.current > 250) {
         setCameraPreview(current => current?.trackingValid ? tick : current);
       }
-      if (tick.trackingLost && !settingsOpen && !cameraProblem) {
-        if (session && !recovery.current.active && (!session.snapshot().paused || warmup.current || countdownRef.current>0)) pause('ไม่พบตัวผู้เล่น กลับมาให้เห็นไหล่ถึงเอว', true);
-        else if (!session && tick.calibrated) setCameraProblem('ไม่พบตัวผู้เล่น กลับมาให้เห็นไหล่ถึงเอว');
+      if (tick.trackingLost && cameraGameplayActive && !settingsOpen && !calibrationOpen && !cameraProblem) {
+        if (session && !recovery.current.active && (!session.snapshot().paused || warmup.current || countdownRef.current>0)) pause('ไม่พบตัวผู้เล่น กลับมาให้เห็นศีรษะถึงเอว', true);
+        else if (!session && tick.calibrated) setCameraProblem('ไม่พบตัวผู้เล่น กลับมาให้เห็นศีรษะถึงเอว');
       }
     }
     if (session && warmup.current) {
       const valid = modeRef.current === 'manual' || cameraValid.current;
-      if (countdownRef.current > 0 && valid && !document.hidden && !settingsOpen && !cameraProblem) {
+      if (countdownRef.current > 0 && valid && !document.hidden && !settingsOpen && !calibrationOpen && !cameraProblem) {
         const count=Math.ceil(countdownRef.current);if(count!==countdownSound.current)audio.current?.cue('countdown');countdownSound.current=count;
         countdownRef.current = Math.max(0,countdownRef.current-dt);setCountdown(Math.ceil(countdownRef.current));
       }
       if (modeRef.current === 'manual') warmup.current.setControlValid(true);
-      warmup.current.advance(dt, screen === 'warmup' && !countdownRef.current && !document.hidden && !settingsOpen && !cameraProblem && valid);
-      const view = warmup.current.view(session.snapshot());
+      warmup.current.advance(dt, screen === 'warmup' && !countdownRef.current && !document.hidden && !settingsOpen && !calibrationOpen && !cameraProblem && valid);
+      const view = warmup.current.view(session.sceneSnapshot());
       if (!countdownRef.current) countdownSound.current=0;
       const checkpoint = `${view.stage}:${view.success}`;
       const lessonChanged=checkpoint!==tutorialCheckpoint.current;
@@ -365,20 +435,20 @@ export function LearningGame() {
       }
       audio.current?.ambient(screen==='warmup' && !view.waiting && valid && !document.hidden && !countdownRef.current);
       dispatchTime.current+=dt;
-      if(dispatchTime.current>=.08 || lessonChanged || view.completed) { dispatchTime.current=0;setLesson(view);setSnapshot(view.snapshot); }
+      if(dispatchTime.current>=.08 || lessonChanged || view.completed) { dispatchTime.current=0;const stable = warmup.current.view(session.snapshot());setLesson(stable);setSnapshot(stable.snapshot); }
       engineRef.current?.renderLearning(view.snapshot,view.items,dt,avatarRef.current);
       if (view.completed) finishTutorial('completed');
       return;
     }
     if (session) {
-      if (countdownRef.current > 0 && !document.hidden && !cameraProblem) {
+      if (countdownRef.current > 0 && !document.hidden && !calibrationOpen && !cameraProblem) {
         if (modeRef.current === 'camera' && !cameraValid.current) {
           pause('กล้องยังไม่พร้อม กลับมาตั้งท่าและยกมือค้างเพื่อเล่นต่อ', true);
         }
         else { countdownRef.current = Math.max(0, countdownRef.current - dt); setCountdown(Math.ceil(countdownRef.current)); if (!countdownRef.current) session.resume(); }
       }
-      if (!document.hidden && !settingsOpen && !cameraProblem) session.advance(dt);
-      const s = session.snapshot();
+      if (!document.hidden && !settingsOpen && !calibrationOpen && !cameraProblem) session.advance(dt);
+      const s = session.sceneSnapshot();
       audio.current?.ambient(!s.paused && s.phase !== 'terminal' && !document.hidden && !countdownRef.current);
       const count = Math.ceil(countdownRef.current);
       if (count && count !== countdownSound.current) audio.current?.cue('countdown');
@@ -399,16 +469,16 @@ export function LearningGame() {
         if (terminalSeen.current !== s.record.runId) {
           terminalSeen.current = s.record.runId; terminalDelay.current = 1;
           try { sessionStorage.removeItem('body-rush-tab-run'); } catch {}
-          setSnapshot(s);
+          setSnapshot(session.snapshot());
         } else if (!document.hidden) terminalDelay.current = Math.max(0,terminalDelay.current-dt);
         if (!terminalDelay.current && screen === 'run') {
           audio.current?.cue(s.record.outcome === 'completed' ? 'finish' : 'gameover');
-          stopCamera();setScreen('result');setSnapshot(s);
+          stopCamera();setScreen('result');setSnapshot(session.snapshot());
           setData(current => ({ ...current, runs: [...current.runs.filter(r => r.runId !== s.record.runId), s.record] }));
         }
       }
       dispatchTime.current += dt;
-      if (dispatchTime.current >= .08) { dispatchTime.current = 0; setSnapshot(s); }
+      if (dispatchTime.current >= .08) { dispatchTime.current = 0; setSnapshot(session.snapshot()); }
       engineRef.current?.renderLearning(s, session.visibleItems(), dt, avatarRef.current);
     } else engineRef.current?.renderLearning(null, [], dt, avatarRef.current);
   };
@@ -448,7 +518,8 @@ export function LearningGame() {
   const confirmSettings = () => { hold.current.reset(); setHoldProgress(0); setSettingsOpen(false); };
   startRef.current = () => {
     if (startPending.current) return;
-    if (cameraProblem) confirmCameraProblem();
+    if (calibrationOpen) confirmCalibration();
+    else if (cameraProblem) confirmCameraProblem();
     else if (settingsOpen) confirmSettings();
     else void start(activeProfile.current ?? undefined);
   };
@@ -477,7 +548,7 @@ export function LearningGame() {
     }
     try { sessionStorage.removeItem('body-rush-tab-run'); } catch {}
     recovery.current.cancel();warmup.current=null;setLesson(null);audio.current?.quiet();
-    countdownRef.current = 0; setCountdown(0); stopCamera(); sessionRef.current = null; setSnapshot(null); setScreen('ready');
+    countdownRef.current = 0; setCountdown(0); setCalibrationOpen(false); calibrationOpenRef.current = false; setCameraProblem(null); stopCamera(); sessionRef.current = null; setSnapshot(null); setScreen('ready');
   };
   const backToReady = () => { recovery.current.cancel();audio.current?.quiet(); sessionRef.current = null; setSnapshot(null); setNotice(''); setScreen('ready'); };
   const resume = () => {
@@ -486,7 +557,7 @@ export function LearningGame() {
   };
   const edit = (p?: Profile) => { setDraftProfile(p ?? profile ?? newProfile()); setScreen('profile'); };
   const setGraphics = (value: GraphicsQuality) => {
-    setQuality(value); engineRef.current?.setGraphicsQuality(value);
+    setQuality(value); frameBudget.current.reset(value); engineRef.current?.setGraphicsQuality(value);
     try { localStorage.setItem('body-rush-graphics-quality', value); } catch {}
   };
   const s = snapshot;
@@ -520,8 +591,8 @@ export function LearningGame() {
     onLostPointerCapture={() => { swipeStart.current = null; }}>
 
     <div ref={sceneRef} className="lr-scene" aria-hidden="true" />
-    <div ref={floatingCameraHost} hidden={!cameraOn || settingsOpen || !!cameraProblem} className={`lr-camera-float ${inRun ? 'playing' : ''}`} />
-    <CameraPreview placement={cameraProblem ? 'problem' : settingsOpen && mode === 'camera' ? 'settings' : 'floating'} setupHost={setupCameraHost} problemHost={problemCameraHost} floatingHost={floatingCameraHost} videoRef={videoRef} on={cameraOn} status={cameraStatus} output={cameraPreview} jumped={cameraJumped} compact={!!cameraProblem || (inRun && !settingsOpen)} />
+    <div ref={floatingCameraHost} hidden={!cameraOn || settingsOpen || showCameraProblem || calibrationOpen} className={`lr-camera-float ${inRun ? 'playing' : ''}`} />
+    <CameraPreview placement={calibrationOpen ? 'calibration' : showCameraProblem ? 'problem' : settingsOpen && mode === 'camera' ? 'settings' : 'floating'} calibrationHost={calibrationCameraHost} calibration={calibrationOpen ? calibrationView : undefined} jumpTarget={cameraTarget} setupHost={setupCameraHost} problemHost={problemCameraHost} floatingHost={floatingCameraHost} videoRef={videoRef} on={cameraOn} status={cameraStatus} output={cameraPreview} jumped={cameraJumped} compact={calibrationOpen || showCameraProblem || (inRun && !settingsOpen)} />
     <div ref={contentRef} className="lr-content">{inRun && s ? <>
       {mode === 'manual' && (!s.paused || inPractice) && <small className="lr-swipe-hint">ปัดซ้าย–ขวาเปลี่ยนเลน · ปัดขึ้นกระโดด</small>}
       {notice && <div className="lr-run-notice" role="status">{notice}</div>}
@@ -530,7 +601,7 @@ export function LearningGame() {
         <div className={`lr-streak ${s.wrongStreak === 2 ? 'warning' : ''}`}><small>ผิดติดต่อกัน</small><strong>{s.wrongStreak} / 3</strong></div><button className="secondary" onClick={() => inPractice ? leaveRun() : pause('พักเกม')}>{inPractice ? 'กลับเมนู' : 'พัก'}</button></header>
       <EnergyHud snapshot={s} />
       {!!pickups.length && !s.paused && <div className="lr-kcal-pickups" role="status" aria-live="polite" aria-atomic="true">{pickups.map(p => <p key={p.id}>{p.label}</p>)}</div>}
-      {inPractice && lesson && <section className="lr-guided-tip" role="status"><p className="lr-kicker">ลองเล่น · ขั้น {lesson.progress+1} / {lesson.total}</p><h2>{lesson.success ? '✓ ใช่แล้ว! ไปต่อกัน' : lesson.stage === 'lane' ? 'ขยับไปหาแสง' : lesson.stage === 'item' ? 'เลือกเลนที่ไฮไลต์' : lesson.stage === 'jump' ? 'กระโดดเบา ๆ เพื่อเก็บสัญลักษณ์' : `เลือกคำตอบ: ${s.question?.options.find(o => o.optionId === s.question?.question.correctOptionId)?.text ?? ''}`}</h2><p>{lesson.success ? 'ฉากกำลังเดินต่อ' : !cameraReady && mode === 'camera' ? cameraStatus : lesson.stage === 'jump' ? (mode === 'camera' ? 'อยู่เลนกลาง ให้เห็นไหล่ถึงเอว แล้วกระโดดเบา ๆ' : 'อยู่เลนกลาง กด Space / ↑ หรือปัดขึ้น') : mode === 'camera' ? 'ขยับไหล่เข้าเลนที่ไฮไลต์ แล้วอยู่นิ่งสักครู่' : 'กด ← / → หรือ A / D หรือปัดจอ ไปเลนที่ไฮไลต์'}</p>{mode==='camera' && !cameraReady && <button className="secondary" onClick={()=>chooseMode('manual')}>ใช้ปุ่ม / ปัดจอแทน</button>}{lesson.stage==='item' && <small>ลองเก็บสัญลักษณ์ในเลนที่ไฮไลต์</small>}{lesson.stage==='quiz' && <small>ลองประตูคำตอบ</small>}<small className="lr-guided-energy">พลังงานสุทธิในเกม {s.netEnergyKcal===null?'ยังประมาณครบไม่ได้':formatGameKcal(s.netEnergyKcal)} kcal</small><div className="lr-tutorial-lanes" aria-hidden="true">{[0,1,2].map(i=><span key={i} className={i===lesson.target ? 'target' : ''}>{i===lesson.target ? '✦' : '·'}</span>)}</div><button className="lr-link" onClick={() => finishTutorial('skipped')}>ข้ามการฝึก</button></section>}
+      {inPractice && lesson && <section className="lr-guided-tip" role="status"><p className="lr-kicker">ลองเล่น · ขั้น {lesson.progress+1} / {lesson.total}</p><h2>{lesson.success ? '✓ ใช่แล้ว! ไปต่อกัน' : lesson.stage === 'lane' ? 'ขยับไปหาแสง' : lesson.stage === 'item' ? 'เลือกเลนที่ไฮไลต์' : lesson.stage === 'jump' ? 'กระโดดเบา ๆ เพื่อเก็บสัญลักษณ์' : `เลือกคำตอบ: ${s.question?.options.find(o => o.optionId === s.question?.question.correctOptionId)?.text ?? ''}`}</h2><p>{lesson.success ? 'ฉากกำลังเดินต่อ' : !cameraReady && mode === 'camera' ? cameraStatus : lesson.stage === 'jump' ? (mode === 'camera' ? 'อยู่เลนกลาง ให้จุดศีรษะถึงกรอบบน แล้วลดตัวกลับ' : 'อยู่เลนกลาง กด Space / ↑ หรือปัดขึ้น') : mode === 'camera' ? 'ขยับไหล่เข้าเลนที่ไฮไลต์ แล้วอยู่นิ่งสักครู่' : 'กด ← / → หรือ A / D หรือปัดจอ ไปเลนที่ไฮไลต์'}</p>{mode==='camera' && !cameraReady && <button className="secondary" onClick={()=>chooseMode('manual')}>ใช้ปุ่ม / ปัดจอแทน</button>}{lesson.stage==='item' && <small>ลองเก็บสัญลักษณ์ในเลนที่ไฮไลต์</small>}{lesson.stage==='quiz' && <small>ลองประตูคำตอบ</small>}<small className="lr-guided-energy">พลังงานสุทธิในเกม {s.netEnergyKcal===null?'ยังประมาณครบไม่ได้':formatGameKcal(s.netEnergyKcal)} kcal</small><div className="lr-tutorial-lanes" aria-hidden="true">{[0,1,2].map(i=><span key={i} className={i===lesson.target ? 'target' : ''}>{i===lesson.target ? '✦' : '·'}</span>)}</div><button className="lr-link" onClick={() => finishTutorial('skipped')}>ข้ามการฝึก</button></section>}
 
       {s.phase === 'quiz_approach' && <>
         <section className={`lr-question-banner ${s.questionIndex === 9 ? 'finish-question' : ''}`} aria-live="polite"><p className="lr-kicker">{s.questionIndex === 9 ? 'FINISH · คำถามสุดท้าย' : `QUIZ ${s.questionIndex + 1} / 10`}</p><h2>{s.question?.question.prompt}</h2><progress value={s.approachProgress} max={1} /><div className="lr-gate-choices">{options.map((o, i) => <button key={o.optionId} className={s.lane === i ? 'selected' : ''} aria-pressed={s.lane === i} disabled={mode === 'camera' || (s.paused && !inPractice)} onClick={() => selectLane(i as Lane)}><strong>{o.text}</strong></button>)}</div><small>{s.waitingForLane ? 'รอเลนนิ่งก่อนตัดสิน' : s.questionIndex === 9 ? 'เลือกคำตอบ แล้ววิ่งผ่านเส้นชัย!' : 'วิ่งเข้าประตูคำตอบที่เลือก!'}</small></section>
@@ -562,7 +633,7 @@ export function LearningGame() {
       }} /></>}
       {screen === 'armed' && <section className="lr-gesture-start"><p className="lr-kicker">{recovery.current.active ? `เกมพักไว้ · ${profile?.nickname}` : `พร้อมออกวิ่ง · ${profile?.nickname}`}</p>{recovery.current.active && <p className="lr-recovery-note">{pauseReason} · {warmup.current ? 'ฝึกต่อจากขั้นเดิม' : `คำถาม ${Math.min((snapshot?.questionIndex ?? 0)+1,10)} / 10`}</p>}<h1>{cameraReady ? (recovery.current.active ? 'ยกมือค้างไว้เพื่อเล่นต่อ' : 'ยกมือค้างไว้เพื่อเริ่ม') : (recovery.current.active ? 'ตั้งท่ากลางใหม่ก่อนเล่นต่อ' : 'ตั้งท่ากลางก่อนเริ่ม')}</h1><div className="lr-hold-ring" role="progressbar" aria-label={recovery.current.active ? 'ยกมือค้างเพื่อเล่นต่อ' : 'ยกมือค้างเพื่อเริ่ม'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(holdProgress*100)} style={{ '--hold': `${holdProgress*360}deg` } as React.CSSProperties}><span>✋</span></div><p className="lr-gesture-instruction">{holdProgress > 0 ? 'ค้างไว้อีกนิด…' : cameraReady ? 'ลดมือลงก่อน แล้วยกมือข้างใดข้างหนึ่งเหนือไหล่ค้าง 1.5 วินาที' : cameraStatus}</p><div className="lr-actions"><button className="secondary" onClick={beginCamera}>ตั้งกล้องใหม่</button><button disabled={!cameraReady || busy} onClick={() => void start(activeProfile.current ?? undefined)}>{recovery.current.active ? 'เล่นต่อด้วยปุ่ม' : 'เริ่มด้วยปุ่ม'}</button><button className="secondary" onClick={() => { chooseMode('manual'); void start(activeProfile.current ?? undefined); }}>ใช้ปุ่ม / ปัดจอ</button><button className="lr-link" onClick={() => { hold.current.reset();leaveRun(); }}>กลับ</button></div></section>}
       {screen === 'tutorial' && <>
-        <p className="lr-kicker">ก่อนออกวิ่ง</p><h1>เลือกให้พอดี ตอบให้เข้าใจ</h1><ol className="lr-tutorial"><li><strong>เลือกเลน</strong><p>กล้อง: เลื่อนไหล่ซ้าย–ขวาจากท่ากลาง · ปุ่ม: ← / → หรือ A / D เลื่อนทีละเลน · มือถือปัดซ้าย–ขวา กระโดดเก็บสัญลักษณ์ออกกำลังกาย: กล้องกระโดดเบา ๆ · ปุ่ม Space / ↑ · มือถือปัดขึ้น · กระโดดข้ามอาหารบนพื้นโดยไม่เก็บ</p></li><li><strong>เลือกของให้สมดุล</strong><p>อาหารทุกชนิดเพิ่ม kcal ตามหน่วยบริโภค · น้ำเปล่า 0 kcal · กระโดดเก็บสัญลักษณ์ออกกำลังกายเพื่อลด kcal สุทธิ · 1 ชิ้นแทนกิจกรรมจำลอง 15 นาที · เก็บพลาดไม่เปลี่ยนค่า</p></li><li><strong>วิ่งเข้าประตูคำตอบ</strong><p>คำถามและคำตอบอยู่ด้านบน มีประตูแสดงคำตอบ เลือกเลนในช่วง 6 วินาทีก่อนถึงประตู เกมวิ่งต่อและล็อกคำตอบเมื่อผ่านประตู</p></li><li><strong>ผิดติดกัน 3 ข้อจบรอบ</strong><p>ตอบถูกรีเซ็ตการผิดติดกัน ประตูคำถามข้อ 10 คือเส้นชัย จบแล้วทบทวนเหตุผลได้ทั้งเมื่อแพ้และถึงเส้นชัย</p></li></ol><Practice mode={mode} cameraReady={cameraReady} detectedLane={detectedLane} /><p className="lr-muted">เริ่มอาหารสะสมที่ 0 kcal เป้าพลังงานต่อวันคำนวณจากเพศ อายุ ส่วนสูง และน้ำหนัก โดยสมมติว่ามีกิจกรรมน้อย ยอดอาหารในเกมไม่ใช่บันทึกอาหารจริงทั้งวัน</p><button onClick={() => setScreen('ready')}>เข้าใจแล้ว →</button>
+        <p className="lr-kicker">ก่อนออกวิ่ง</p><h1>เลือกให้พอดี ตอบให้เข้าใจ</h1><ol className="lr-tutorial"><li><strong>เลือกเลน</strong><p>กล้อง: เลื่อนไหล่ซ้าย–ขวาจากท่ากลาง · ปุ่ม: ← / → หรือ A / D เลื่อนทีละเลน · มือถือปัดซ้าย–ขวา กระโดดเก็บสัญลักษณ์ออกกำลังกาย: กล้องยกตัวให้จุดศีรษะแตะกรอบบน แล้วลดตัวกลับ · ปุ่ม Space / ↑ · มือถือปัดขึ้น · กระโดดข้ามอาหารบนพื้นโดยไม่เก็บ</p></li><li><strong>เลือกของให้สมดุล</strong><p>อาหารทุกชนิดเพิ่ม kcal ตามหน่วยบริโภค · น้ำเปล่า 0 kcal · กระโดดเก็บสัญลักษณ์ออกกำลังกายเพื่อลด kcal สุทธิ · 1 ชิ้นแทนกิจกรรมจำลอง 15 นาที · เก็บพลาดไม่เปลี่ยนค่า</p></li><li><strong>วิ่งเข้าประตูคำตอบ</strong><p>คำถามและคำตอบอยู่ด้านบน มีประตูแสดงคำตอบ เลือกเลนในช่วง 6 วินาทีก่อนถึงประตู เกมวิ่งต่อและล็อกคำตอบเมื่อผ่านประตู</p></li><li><strong>ผิดติดกัน 3 ข้อจบรอบ</strong><p>ตอบถูกรีเซ็ตการผิดติดกัน ประตูคำถามข้อ 10 คือเส้นชัย จบแล้วทบทวนเหตุผลได้ทั้งเมื่อแพ้และถึงเส้นชัย</p></li></ol><Practice mode={mode} cameraReady={cameraReady} detectedLane={detectedLane} /><p className="lr-muted">เริ่มอาหารสะสมที่ 0 kcal เป้าพลังงานต่อวันคำนวณจากเพศ อายุ ส่วนสูง และน้ำหนัก โดยสมมติว่ามีกิจกรรมน้อย ยอดอาหารในเกมไม่ใช่บันทึกอาหารจริงทั้งวัน</p><button onClick={() => setScreen('ready')}>เข้าใจแล้ว →</button>
       </>}
       {result && <>
         <p className="lr-kicker">ผลรอบนี้</p><h1>{s.record.outcome === 'completed' ? 'ถึงเส้นชัยแล้ว!' : 'มาลองทบทวนกัน'}</h1>
@@ -579,12 +650,16 @@ export function LearningGame() {
     </div></div>}
     </div>
     {introOpen && <div className="lr-modal-shade"><section ref={modalRef} className="lr-welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title"><span className="lr-welcome-icon">✦</span><p className="lr-kicker">WELCOME TO FOOD FIT FUN</p><h2 id="welcome-title">พร้อมสนุกไปด้วยกันไหม?</h2><section><h3>Objective</h3><div>{OBJECTIVE_COPY.map(text => <p key={text}>{text}</p>)}</div></section><p className="lr-data-notice">เมื่อเปิดใช้การส่งข้อมูล ชื่อเล่น เพศ อายุ เป้าพลังงานต่อวันโดยประมาณ พลังงานและรายการอาหารในเกม เวอร์ชันสูตร คะแนนตอบคำถาม คะแนนเกม ดาวความสนุก และความคิดเห็นจะส่งไปเก็บที่ Supabase เพื่อวิเคราะห์รวมหลายเครื่อง ภาพกล้อง ส่วนสูง น้ำหนัก และคำตอบรายข้อเก็บอยู่ในเครื่อง</p><label className="lr-checkbox"><input type="checkbox" checked={introChecked} onChange={e => setIntroChecked(e.target.checked)} />อ่าน Objective แล้ว</label><button disabled={!introChecked} onClick={() => { audio.current?.cue('confirm'); setIntroOpen(false); }}>OK · ไปกันเลย →</button></section></div>}
-    {cameraProblem && <CameraProblemDialog ref={modalRef} reason={cameraProblem} status={cameraStatus} ready={cameraReady} on={cameraOn} lighting={cameraLighting} previewHost={problemCameraHost} calibrationProgress={cameraPreview?.calibrationProgress ?? 0} holdProgress={holdProgress} recovering={recovery.current.active}
+    {showCameraProblem && cameraProblem && <CameraProblemDialog ref={modalRef} reason={cameraProblem} status={cameraStatus} ready={cameraReady} on={cameraOn} lighting={cameraLighting} previewHost={problemCameraHost} calibrationProgress={cameraPreview?.calibrationProgress ?? 0} holdProgress={holdProgress} recovering={recovery.current.active}
       onContinue={confirmCameraProblem}
       onRestart={beginCamera} onRecenter={recenterCamera}
       onManual={() => { setCameraProblem(null); chooseMode('manual'); if (recovery.current.active || screen === 'armed') void start(activeProfile.current ?? undefined); }}
       onExit={() => { setCameraProblem(null); leaveRun(); }} />}
-    {settingsOpen && !cameraProblem && <div className="lr-modal-shade"><section ref={modalRef} className={`lr-settings-modal ${mode === 'camera' ? 'lr-camera-settings-modal' : ''}`} role="dialog" aria-modal="true" aria-labelledby="settings-title"><p className="lr-kicker">ปรับก่อนออกวิ่ง</p><div className="lr-settings-heading"><h2 id="settings-title">ตั้งค่าการเล่น</h2><button className="secondary" aria-label="ปิดการตั้งค่า" onClick={() => setSettingsOpen(false)}>ปิด ✕</button></div>
+    {calibrationOpen && <CameraCalibrationDialog ref={modalRef} view={calibrationView} previewHost={calibrationCameraHost} on={cameraOn} status={cameraStatus} lighting={cameraLighting} ready={cameraReady && calibrationView.stage === 'ready'} holdProgress={holdProgress} onConfirm={confirmCalibration} onReset={resetCalibration} onRestart={beginCamera}
+      onRetryJump={() => { calibration.current.retryJump(); cameraVerified.current = false; setCameraReady(false); hold.current.reset(); setHoldProgress(0); setCalibrationView(calibration.current.view); }}
+      onManual={() => { setCalibrationOpen(false); calibrationOpenRef.current = false; chooseMode('manual'); hold.current.reset(); if (recovery.current.active || screen === 'armed') void start(activeProfile.current ?? undefined); else setSettingsOpen(calibrationReturnSettings.current); }}
+      onCancel={() => { setCalibrationOpen(false); calibrationOpenRef.current = false; stopCamera(); if (recovery.current.active || screen === 'armed') leaveRun(); else setSettingsOpen(calibrationReturnSettings.current); }} />}
+    {settingsOpen && !showCameraProblem && !calibrationOpen && <div className="lr-modal-shade"><section ref={modalRef} className={`lr-settings-modal ${mode === 'camera' ? 'lr-camera-settings-modal' : ''}`} role="dialog" aria-modal="true" aria-labelledby="settings-title"><p className="lr-kicker">ปรับก่อนออกวิ่ง</p><div className="lr-settings-heading"><h2 id="settings-title">ตั้งค่าการเล่น</h2><button className="secondary" aria-label="ปิดการตั้งค่า" onClick={() => setSettingsOpen(false)}>ปิด ✕</button></div>
       <div className="lr-mode"><button className={mode === 'camera' ? 'selected secondary' : 'secondary'} aria-pressed={mode === 'camera'} onClick={() => chooseMode('camera')}><strong>◎ กล้อง</strong><small>ขยับไหล่ซ้าย–ขวา</small></button><button className={mode === 'manual' ? 'selected secondary' : 'secondary'} aria-pressed={mode === 'manual'} onClick={() => chooseMode('manual')}><strong>⌨ คีย์บอร์ด / ปัดจอ</strong><small>← / → หรือ A / D · มือถือปัดซ้าย–ขวา</small></button></div>
       {mode === 'camera' && <section className="lr-camera-settings"><div ref={setupCameraHost} className="lr-camera-setup-preview" /><CameraTuningControls tuning={cameraTuning} onChange={tuneCamera} onRecenter={recenterCamera} onOpen={beginCamera} on={cameraOn} ready={cameraReady} status={cameraStatus} holdProgress={holdProgress} /></section>}
       <div className="lr-quality"><span>คุณภาพภาพ</span>{(['low','medium','high'] as const).map((v,i) => <button className="secondary" aria-pressed={v === quality} key={v} onClick={() => setGraphics(v)}>{['เบา','กลาง','สูง'][i]}</button>)}</div>

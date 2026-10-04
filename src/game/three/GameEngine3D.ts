@@ -40,6 +40,8 @@ export interface Entity3D {
 }
 
 export class GameEngine3D {
+  public learningMaxFps: 30 | 60 = 60;
+  private learningRenderElapsed = 0;
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
   public renderer: THREE.WebGLRenderer;
@@ -926,6 +928,11 @@ export class GameEngine3D {
 
   /** Rendering adapter only: RunSession owns distance, collision, quiz and score. */
   public renderLearning(snapshot: Snapshot | null, items: SceneItem[], dt: number, avatar: 'mint' | 'rose' | 'amber') {
+    const moving = snapshot && !snapshot.paused && ['running','quiz_approach','quiz_feedback'].includes(snapshot.phase) && !snapshot.waitingForLane;
+    this.learningRenderElapsed += dt;
+    const interval = moving ? 1 / this.learningMaxFps : .1;
+    if (this.learningPrepared && this.learningRenderElapsed < interval - .001) return;
+    dt = this.learningRenderElapsed; this.learningRenderElapsed = 0;
     if (!this.learningPrepared) {
       this.isRunning = false;
       this.manualInputEnabled = false;
@@ -935,7 +942,6 @@ export class GameEngine3D {
       this.learningPrepared = true;
     }
     this.particlesMesh.visible = false; // Quiet park air keeps distant food and answer gates readable.
-    const moving = snapshot && !snapshot.paused && ['running','quiz_approach','quiz_feedback'].includes(snapshot.phase) && !snapshot.waitingForLane;
     const speed = moving ? (snapshot?.motionSpeed ?? COURSE_SPEED) : 0;
     const timeline = snapshot?.record.inputTimeline;
     const cameraInput = timeline?.[timeline.length - 1]?.mode === 'camera';

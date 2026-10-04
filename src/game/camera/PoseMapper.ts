@@ -1,4 +1,6 @@
 import { LANE_TUNING, type Sensitivity } from './CameraTuning';
+import { torsoSample } from './TorsoPose';
+import type { LaneCalibration } from './CameraCalibration';
 /** MediaPipe Pose landmark fields used by the game. Coordinates are normalized to the input image. */
 export interface PoseLandmark {
   x: number;
@@ -95,6 +97,7 @@ export class PoseMapper {
   private calibrationHipAnchor = 0;
   private neutralX: number | null = null;
   private neutralWidth = 0;
+  private laneCalibration: LaneCalibration | null = null;
   private setupHint: PoseOutput['setupHint'];
   private handTrackingValid = false;
   private smoothedOffset = 0;
@@ -120,6 +123,20 @@ export class PoseMapper {
     this.resetGesture();
   }
 
+  setLaneCalibration(value: LaneCalibration | null): void {
+    this.laneCalibration = value;
+    if (value) { this.neutralX = value.center; this.neutralWidth = value.width; }
+    this.lane = 1; this.resetGesture();
+  }
+
+  get laneBoundaries(): [number, number] {
+    const center = this.neutralX ?? .5, width = this.neutralWidth || .2;
+    const factor = LANE_TUNING[this.sensitivity].enter / LANE_TUNING.normal.enter;
+    return this.laneCalibration
+      ? [center - (center - this.laneCalibration.left) / 2 * factor, center + (this.laneCalibration.right - center) / 2 * factor]
+      : [center - width * LANE_TUNING[this.sensitivity].enter, center + width * LANE_TUNING[this.sensitivity].enter];
+  }
+
   reset(): void {
     this.lastFrameMs = -Infinity;
     this.lastGoodMs = -Infinity;
@@ -127,6 +144,7 @@ export class PoseMapper {
     this.clearCalibration();
     this.neutralX = null;
     this.neutralWidth = 0;
+    this.laneCalibration = null;
     this.setupHint = undefined;
     this.handTrackingValid = false;
     this.lane = 1;
@@ -224,7 +242,7 @@ export class PoseMapper {
     if (!reliable(left) || !reliable(right)) return null;
     const width = Math.abs(left.x - right.x);
     if (width < MIN_SHOULDER_WIDTH) return null;
-    return { x: (left.x + right.x) / 2, width, left, right };
+    return { x: torsoSample(landmarks)?.x ?? (left.x + right.x) / 2, width, left, right };
   }
 
   private getTorso(landmarks: PoseInput, shoulders: Shoulders): Torso | null {
@@ -265,6 +283,10 @@ export class PoseMapper {
     if (timestampMs - this.calibrationStartMs! >= CALIBRATION_MS) {
       this.neutralX = this.calibrationCenterSum / this.calibrationCount;
       this.neutralWidth = this.calibrationWidthSum / this.calibrationCount;
+      if (this.laneCalibration) {
+        const old = this.laneCalibration, scale = this.neutralWidth / old.width;
+        this.laneCalibration = { center: this.neutralX, width: this.neutralWidth, left: this.neutralX + (old.left - old.center) * scale, right: this.neutralX + (old.right - old.center) * scale };
+      }
       this.clearCalibration();
       this.handArmed = true;
       this.handMustLower = null;
@@ -280,14 +302,15 @@ export class PoseMapper {
   }
 
   private desiredLane(offset: number): Lane {
-    const { enter, exit } = LANE_TUNING[this.sensitivity];
-    if (this.lane === 1) {
-      if (offset < -enter) return 0;
-      if (offset > enter) return 2;
-      return 1;
-    }
-    if (this.lane === 0) return offset > -exit ? 1 : 0;
-    return offset < exit ? 1 : 2;
+    const [left, right] = this.laneBoundaries;
+    const leftEnter = (left - this.neutralX!) / this.neutralWidth;
+    const rightEnter = (right - this.neutralX!) / this.neutralWidth;
+    if (offset < leftEnter) return 0;
+    if (offset > rightEnter) return 2;
+    const hysteresis = LANE_TUNING[this.sensitivity].exit / LANE_TUNING[this.sensitivity].enter;
+    if (this.lane === 0 && offset < leftEnter * hysteresis) return 0;
+    if (this.lane === 2 && offset > rightEnter * hysteresis) return 2;
+    return 1;
   }
 
   private observeHandRaise(

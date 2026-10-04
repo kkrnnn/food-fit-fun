@@ -273,3 +273,56 @@
   .lr-camera-mode .lr-camera-sensitivity {grid-template-columns:1fr}
   .lr-camera-mode .lr-modal-shade .lr-kicker {font-size:18px}
 }
+
+/* Full camera setup: large instructions and an overlay sharing the mapper coordinates. */
+.lr-calibration-shade {z-index:25}
+.lr-game .lr-calibration-modal {width:min(1180px,100%);padding:28px;max-height:calc(100dvh - 32px);overflow:auto}
+.lr-calibration-heading {display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:20px}
+.lr-calibration-heading p {margin:0}
+.lr-calibration-body {display:grid;grid-template-columns:minmax(0,1.4fr) minmax(280px,1fr);gap:30px;align-items:center}
+.lr-calibration-preview {min-width:0}
+.lr-calibration-preview .lr-camera-readout {display:none}
+.lr-calibration-guide h2 {margin:0 0 12px}
+.lr-calibration-guide>p {margin:12px 0 18px}
+.lr-calibration-checklist {display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:20px 0;font-size:23px;font-weight:700}
+.lr-calibration-checklist span {padding:10px 12px;border:1px solid #d5cfe2;border-radius:12px;background:#ece7f2;color:#71667e}
+.lr-calibration-checklist .passed {background:#dcf5e9;border-color:#68af90;color:#175e43}
+.lr-calibration-guide progress {display:block;width:100%;height:14px;accent-color:#27a878;margin:18px 0}
+.lr-calibration-status {padding:12px 16px;background:#fff0ce;border-radius:12px}
+.lr-calibration-ok {width:100%;margin:14px 0}
+.lr-calibration-tools {display:flex;flex-wrap:wrap;gap:10px}
+.lr-game .lr-calibration-tools button {font-size:20px;min-height:48px;padding:10px 14px}
+.lr-calibration-zones {position:absolute;inset:0;display:grid;pointer-events:none}
+.lr-calibration-zones>div {border-right:2px solid #ffffffbd;background:#ffffff06;display:flex;justify-content:center;align-items:flex-start;padding-top:16px;min-width:0;transition:background .2s}
+.lr-calibration-zones>div:last-of-type {border-right:0}
+.lr-calibration-zones>div.target {background:#b89bff24;box-shadow:inset 0 0 0 3px #e9daff}
+.lr-calibration-zones>div.passed {background:#35df8b38}
+.lr-calibration-zones>div span {background:#252337dd;color:white;font-size:clamp(20px,2.2vw,28px);padding:6px 12px;border-radius:10px;white-space:nowrap;font-weight:700}
+.lr-calibration-zones>div.passed span {background:#14533ce8;color:#e1ffed}
+.lr-calibration-position {position:absolute;top:55%;transform:translate(-50%,-50%);font-size:38px;color:#fff;text-shadow:0 0 4px #302241,0 0 10px #302241}
+@media(max-width:800px) {
+  .lr-game .lr-calibration-modal {padding:20px 16px}
+  .lr-calibration-body {grid-template-columns:1fr;gap:18px}
+  .lr-calibration-preview {width:100%;max-width:580px;margin:auto}
+  .lr-calibration-heading {margin-bottom:14px}
+  .lr-calibration-checklist {grid-template-columns:repeat(4,1fr);gap:6px;font-size:17px;margin:12px 0}
+  .lr-calibration-checklist span {padding:8px 4px;text-align:center}
+  .lr-calibration-guide>p {margin:8px 0 12px}
+  .lr-calibration-zones>div {padding-top:10px}
+  .lr-calibration-zones>div span {font-size:20px;padding:5px 9px}
+}
+.lr-calibration-upper-target {position:absolute;inset:0 0 auto;background:#bdadff22;border-bottom:4px dashed #e2cbff;display:flex;align-items:flex-end;justify-content:center;pointer-events:none}
+.lr-calibration-upper-target>span {background:#473367e6;color:#fff;border-radius:10px 10px 0 0;padding:6px 14px;font-size:clamp(20px,2vw,26px);font-weight:700}
+.lr-calibration-zones>.lr-calibration-upper-target {padding-top:0;align-items:flex-end;border-right:0}
+.lr-calibration-upper-target.passed {background:#35df8b35;border-color:#7bffc2}
+.lr-calibration-upper-target.passed>span {background:#14533ce8;color:#e1ffed}
+.lr-calibration-position {z-index:2}
+
+.lr-camera-upper-overlay {position:absolute;inset:0;pointer-events:none}
+.lr-camera-upper-overlay .lr-calibration-position {font-size:15px}
+.lr-camera-upper-overlay .lr-calibration-upper-target {border-bottom-width:2px}
+.lr-calibration-position {font-size:18px}
+@media(max-width:800px) {
+  .lr-calibration-guide .lr-calibration-ok {position:sticky;bottom:0;z-index:3;box-shadow:0 -6px 12px #fcfaff}
+  .lr-calibration-checklist span:last-child {font-size:15px;white-space:nowrap}
+}

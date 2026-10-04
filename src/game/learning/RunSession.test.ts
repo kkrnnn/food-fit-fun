@@ -18,6 +18,18 @@ export function answer(run: RunSession, correct: boolean) {
   run.setLane(lane as 0 | 1 | 2); run.advance(6);
 }
 
+it('keeps saved/UI snapshots detached while providing an immediate scene view', () => {
+  const run = makeRun(); const saved = run.snapshot(); const initialDistance = saved.record.distance;
+  const frame = run.sceneSnapshot(); expect(frame.distance).toBe(saved.distance);
+  run.advance(.2);
+  expect(saved.record.distance).toBe(initialDistance);
+  expect(run.sceneSnapshot().distance).toBeGreaterThan(initialDistance);
+  saved.record.playerNameAtStart = 'modified';
+  saved.record.plannedQuestions[0].question.prompt = 'modified';
+  expect(run.snapshot().record.playerNameAtStart).toBe('ทดสอบ');
+  expect(run.snapshot().record.plannedQuestions[0].question.prompt).not.toBe('modified');
+});
+
 describe('learning run through the public commands', () => {
   it('jumps above a ground item without collecting it, while a landed runner collects', () => {
     for (const airborne of [true,false]) {

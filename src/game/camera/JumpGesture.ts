@@ -1,35 +1,68 @@
 import type { PoseInput } from './PoseMapper';
 import { JUMP_TUNING, type Sensitivity } from './CameraTuning';
-/** Torso rise is independent of wrist-based start gestures. One pulse per landing cycle. */
+import { torsoSample } from './TorsoPose';
+import { headSample, upperHeadTarget } from './HeadPose';
+export interface JumpCalibration { head: number; height: number; threshold: number }
+/** Cross the fixed upper head target once, then return below it to rearm. */
 export class JumpGesture {
   constructor(private sensitivity: Sensitivity = 'normal') {}
-  setSensitivity(value: Sensitivity): void { this.sensitivity = value; this.reset(); }
+  private calibrated: JumpCalibration | null = null;
   private last = -Infinity;
-  private baseline: { shoulder: number; hip: number; height: number } | null = null;
+  private baseline: { head: number; height: number } | null = null;
+  private previousRise = 0;
   private neutralSince = 0;
   private rising = false;
+  private armed = false;
+  private landingSince: number | null = null;
   private emittedAt = -Infinity;
-  reset(): void { this.last=-Infinity;this.baseline=null;this.rising=false;this.neutralSince=0;this.emittedAt=-Infinity; }
+  setCalibration(value: JumpCalibration | null): void { this.calibrated = value; this.reset(); }
+  setSensitivity(value: Sensitivity): void { this.sensitivity = value; this.reset(); }
+  get targetY(): number | null {
+    const baseline = this.baseline ?? this.calibrated;
+    if (!baseline) return null;
+    const threshold = this.calibrated ? this.calibrated.threshold * JUMP_TUNING[this.sensitivity] / JUMP_TUNING.normal : JUMP_TUNING[this.sensitivity];
+    return upperHeadTarget(baseline.head, baseline.height, threshold);
+  }
+  reset(): void { this.last = -Infinity; this.baseline = null; this.rising = false; this.armed = false; this.neutralSince = 0; this.emittedAt = -Infinity; this.landingSince = null; this.previousRise = 0; }
   ingest(points: PoseInput, now: number, ready: boolean): boolean {
-    if (!ready || !Number.isFinite(now) || now <= this.last) { this.reset();return false; }
-    if (now-this.last>250) { this.baseline=null;this.rising=false;this.neutralSince=now; }
-    this.last=now;
-    const valid=(i:number)=>{const p=points?.[i];return p && Number.isFinite(p.y) && (p.visibility??1)>=.6 && (p.presence??1)>=.6 ? p : null;};
-    const ls=valid(11),rs=valid(12),lh=valid(23),rh=valid(24);
-    if(!ls||!rs||!lh||!rh){this.reset();return false;}
-    const shoulder=(ls.y+rs.y)/2,hip=(lh.y+rh.y)/2,height=hip-shoulder;
-    if(height<.06){this.reset();return false;}
-    if(!this.baseline){this.baseline={shoulder,hip,height};this.neutralSince=now;return false;}
-    const b=this.baseline,upS=(b.shoulder-shoulder)/b.height,upH=(b.hip-hip)/b.height;
-    const neutral=Math.abs(upS)<.06 && Math.abs(upH)<.06;
-    if(this.rising){
-      if(neutral && now-this.emittedAt>=150){this.rising=false;this.neutralSince=now;}
-      else if(now-this.emittedAt>1200){this.baseline=null;this.rising=false;}
+    if (!ready || !Number.isFinite(now) || now <= this.last) { this.reset(); return false; }
+    const torso = torsoSample(points), head = headSample(points);
+    if (!torso || !head) { this.reset(); return false; }
+    const sample = { head: head.y, height: torso.height };
+    if (now - this.last > 250) { this.baseline = null; this.rising = false; this.armed = false; this.landingSince = null; }
+    const elapsed = now - this.last; this.last = now;
+    if (!this.baseline) {
+      this.baseline = this.calibrated ? { ...this.calibrated } : { ...sample };
+      this.neutralSince = now; this.previousRise = 0; return false;
+    }
+    const b = this.baseline;
+    const rise = (b.head - sample.head) / b.height, velocity = (rise - this.previousRise) / (elapsed / 1000);
+    this.previousRise = rise;
+    if (!this.calibrated && now - this.neutralSince < 150 && Math.abs(rise) > .06) {
+      this.baseline = { ...sample }; this.neutralSince = now; this.previousRise = 0; return false;
+    }
+    const threshold = (b.head - this.targetY!) / b.height;
+    const neutral = rise < threshold * .45;
+    if (this.rising) {
+      if (neutral) {
+        this.landingSince ??= now;
+        if (now - this.landingSince >= 100 && now - this.emittedAt >= 150) { this.rising = false; this.armed = true; this.neutralSince = now; }
+      } else this.landingSince = null;
       return false;
     }
-    if(upS>=JUMP_TUNING[this.sensitivity] && upH>=JUMP_TUNING[this.sensitivity] && Math.abs(upS-upH)<.10 && Math.abs(height/b.height-1)<.15 && now-this.neutralSince>=150 && now-this.emittedAt>=700){this.rising=true;this.emittedAt=now;return true;}
-    if(neutral){b.shoulder=b.shoulder*.98+shoulder*.02;b.hip=b.hip*.98+hip*.02;b.height=b.height*.98+height*.02;}
-    else if(upH<-.08 || Math.abs(height/b.height-1)>.15){this.baseline=null;this.neutralSince=now;}
+    if (!this.armed) {
+      if (!neutral) this.neutralSince = now;
+      if (neutral && now - this.neutralSince >= 150) this.armed = true;
+    }
+    if (this.armed && rise >= threshold && rise < .8 && now - this.neutralSince >= 150 && now - this.emittedAt >= 700) {
+      this.rising = true; this.armed = false; this.emittedAt = now; this.landingSince = null; return true;
+    }
+    // A short crouch must not redefine standing height and turn standing up into a jump.
+    if (neutral && Math.abs(rise) < .06 && Math.abs(velocity) < .25 && !this.calibrated) {
+      const alpha = 1 - Math.exp(-elapsed / 3500);
+      b.head += (sample.head - b.head) * alpha;
+      b.height += (sample.height - b.height) * alpha;
+    }
     return false;
   }
 }

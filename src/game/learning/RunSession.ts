@@ -213,7 +213,11 @@ export class RunSession {
     return this.items.filter(e => this.pendingExercises.some(p => p.item.id === e.id) || (!this.processed.has(e.id) && e.distance > this.record.distance && e.distance - this.record.distance <= COURSE_VIEW_DISTANCE));
   }
   snapshot(): Snapshot {
-    return structuredClone({ jumpProgress: jumpProgress(this.record.activePlayMs-this.jumpStarted),
+    return structuredClone(this.sceneSnapshot());
+  }
+  /** Immediate, read-only rendering view. Its record is live; never retain it for UI or persistence. */
+  sceneSnapshot(): Snapshot {
+    return { jumpProgress: jumpProgress(this.record.activePlayMs-this.jumpStarted),
       foodIntakeKcal: this.record.foodIntakeKcal!, exerciseKcal: this.record.exerciseKcal ?? 0,
       netEnergyKcal: netGameEnergy(this.record.foodIntakeKcal!, this.record.exerciseKcal,this.record.collectedExercises?.some(e=>e.kcalPerPickup===null)), dailyEnergyKcal: this.record.dailyEnergyKcal ?? null,
       energyReason: this.record.energyReason ?? '', characterWidthScale: gameBodyWidth(netGameEnergy(this.record.foodIntakeKcal ?? 0, this.record.exerciseKcal,this.record.collectedExercises?.some(e=>e.kcalPerPickup===null)) ?? 0, this.record.dailyEnergyKcal ?? null), phase: this.phase, paused: this.paused, distance: this.record.distance,
@@ -221,7 +225,7 @@ export class RunSession {
       question: this.record.plannedQuestions[this.questionIndex], lastAnswer: this.record.answers[this.record.answers.length - 1],
       approachProgress: this.selectionMs / (QUIZ_SECONDS * 1000),
       waitingForLane: this.phase === 'quiz_approach' && this.record.distance === (this.questionIndex + 1) * GATE_SPACING && (!this.controlValid || this.laneStableMs < 300),
-      feedback: this.feedback, record: this.record });
+      feedback: this.feedback, record: this.record };
   }
 }
 

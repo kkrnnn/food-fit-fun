@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { CameraPreviewContent, CameraTuningControls, CameraProblemDialog } from './CameraSetup';
+import { CameraPreviewContent, CameraTuningControls, CameraProblemDialog, CameraCalibrationDialog } from './CameraSetup';
+import { CameraCalibration } from '../../game/camera/CameraCalibration';
 import { PoseMapper, type PoseLandmark } from '../../game/camera/PoseMapper';
 it('does not report a detected lane while off, and gives a real calibration progress value', () => {
   const off = renderToStaticMarkup(<CameraPreviewContent on={false} status="กล้องยังไม่เปิด" output={null} jumped={false} />);
@@ -27,4 +28,15 @@ it('names the selected sensitivity choices and disables recenter until the camer
   const markup = renderToStaticMarkup(<CameraTuningControls tuning={{ lane: 'gentle', jump: 'steady' }} on={false} ready={false} status="กล้องยังไม่เปิด" onChange={() => {}} onRecenter={() => {}} onOpen={() => {}} />);
   expect(markup).toContain('aria-pressed="true">ขยับน้อย'); expect(markup).toContain('aria-pressed="true">ลดการติดผิด');
   expect(markup).toContain('disabled="">ตั้งท่ากลางใหม่');
+});
+it('requires completed calibration before OK and keeps zones confined to setup preview', () => {
+  const view = new CameraCalibration().view, noop = () => {};
+  const dialog = renderToStaticMarkup(<CameraCalibrationDialog view={view} previewHost={{current:null}} on status="ยืนกลาง" lighting={null} ready={false} holdProgress={0} onConfirm={noop} onReset={noop} onRetryJump={noop} onRestart={noop} onManual={noop} onCancel={noop} />);
+  expect(dialog).toContain('disabled="">พร้อมแล้ว · OK'); expect(dialog).toContain('ยืนตรงกลางให้นิ่ง');
+  const jumpDialog = renderToStaticMarkup(<CameraCalibrationDialog view={{...view,stage:'jump'}} previewHost={{current:null}} on status="" lighting={null} ready={false} holdProgress={0} onConfirm={noop} onReset={noop} onRetryJump={noop} onRestart={noop} onManual={noop} onCancel={noop} />);
+  expect(jumpDialog).toContain('หนึ่งครั้ง'); expect(jumpDialog).not.toContain('/ 2'); expect(jumpDialog).not.toContain('ความคืบหน้าท่าที่กำลังทดสอบ');
+  const setup = renderToStaticMarkup(<CameraPreviewContent compact on status="" output={null} jumped={false} calibration={{...view,completed:{center:true,left:false,right:false,jump:false},position:.5,valid:true}} />);
+  expect(setup).toContain('lr-calibration-zones'); expect(setup).toContain('ตำแหน่งลำตัว'); expect(setup).toContain('✓ กลาง');
+  const gameplay = renderToStaticMarkup(<CameraPreviewContent compact on status="" output={null} jumped={false} />);
+  expect(gameplay).not.toContain('lr-calibration-zones'); expect(gameplay).not.toContain('ซ้าย');
 });
