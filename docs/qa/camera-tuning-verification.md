@@ -35,4 +35,7 @@ Real camera recognition, movement comfort and physical hand confirmation still n
 
 ## Delivery
 
-Production deploy was requested on 2026-10-04. Record the resulting commit and Vercel deployment URL here after release.
+- Feature commit `b57a80cd62d1ec0c5f676c2edfafd74be3e5c64e` was pushed to `origin/master`.
+- Vercel production deployment `dpl_FGesJ8C5dGhYhsyuyhBr86FuqaET` reached `READY` and was aliased to [food-fit-fun.vercel.app](https://food-fit-fun.vercel.app). The authenticated `vercel curl` response served the page with its newly built JS/CSS assets.
+- The Vercel upload was built from the local checkout at the feature commit because Git was not connected to the Vercel project for push-triggered deployments.
+- Standing-distance readability and physical hand confirmation still need a real-device retest.

@@ -17,4 +17,4 @@ Reuse cream panels, dark purple text, mint highlights, current rounded controls 
 
 ## Verification
 
-Test complete-frame dimensions and illumination, input tuning/noise/rearming, worker stall cleanup, setup progress, clean gameplay preview, and actionable problem-dialog states. Inspect Settings and the problem dialog on desktop and narrow mobile with camera off and representative simulated pose states. Real camera inference and physical comfort require an actual camera retest; simulated landmarks do not verify detector accuracy. Production deployment was authorized on 2026-10-04; record its URL in the verification log.
+Test complete-frame dimensions and illumination, input tuning/noise/rearming, worker stall cleanup, setup progress, clean gameplay preview, and actionable problem-dialog states. Inspect Settings and the problem dialog on desktop and narrow mobile with camera off and representative simulated pose states. Real camera inference and physical comfort require an actual camera retest; simulated landmarks do not verify detector accuracy. Production deployment on 2026-10-04 is recorded in `docs/qa/camera-tuning-verification.md`.
