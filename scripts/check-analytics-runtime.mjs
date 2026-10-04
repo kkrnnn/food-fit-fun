@@ -21,11 +21,11 @@ try {
     const feedback = await import(${JSON.stringify(feedback)});
     const response = await runs.default.fetch(new Request('https://example.test/api/analytics/runs'));
     const body = await response.json();
-    if (response.status !== 503 || body.runSchemaVersion !== 2 || body.exerciseEnergyVersion !== 2)
+    if (response.status !== 503 || body.runSchemaVersion !== 2 || body.exerciseEnergyVersion !== 3)
       throw new Error('Unconfigured API capability response failed');
     const method = await feedback.default.fetch(new Request('https://example.test/api/analytics/feedback'));
     if (method.status !== 405) throw new Error('Feedback method check failed');
-    console.log('Native Node analytics runtime passed: both entries loaded, schema 2, exercise 2');
+    console.log('Native Node analytics runtime passed: both entries loaded, schema 2, exercise 3');
   `], { encoding: 'utf8', env: { ...process.env, ANALYTICS_ENABLED: 'false' } });
   process.stdout.write(smoke.stdout);
   process.stderr.write(smoke.stderr);

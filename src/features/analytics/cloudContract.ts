@@ -2,7 +2,7 @@ import type { RunRecord, Profile } from '../../game/learning/types';
 import { FOOD_NUTRITION, NUTRITION_VERSION } from '../../game/learning/FoodNutrition.js';
 import { ENERGY_MODEL_VERSION } from '../health/energy.js';
 import type { CollectedFood } from '../../game/learning/types';
-import { EXERCISE_MODEL_VERSION, LEGACY_EXERCISE_MODEL_VERSION, exerciseReference, exerciseKcalForWeight, netGameEnergy } from '../../game/learning/ExerciseEnergy.js';
+import { EXERCISE_MODEL_VERSION, ONE_MINUTE_EXERCISE_MODEL_VERSION, LEGACY_EXERCISE_MODEL_VERSION, exerciseReference, exerciseKcalForWeight, netGameEnergy } from '../../game/learning/ExerciseEnergy.js';
 import type { CollectedExercise } from '../../game/learning/types';
 
 export const SURVEY_VERSION = 'enjoyment-v1';
@@ -97,9 +97,10 @@ function energyFields(r: Record<string, unknown>): Partial<CloudRun> {
   if (Math.abs(intake - foods.reduce((sum, f) => sum + f.count * f.kcalPerPortion, 0)) > 0.000001) fail();
   const exerciseFields: Partial<CloudRun> = {};
   if(r.exerciseModelVersion !== undefined) {
-    const version=choice(r.exerciseModelVersion,[EXERCISE_MODEL_VERSION,LEGACY_EXERCISE_MODEL_VERSION]);
+    const version=choice(r.exerciseModelVersion,[EXERCISE_MODEL_VERSION,ONE_MINUTE_EXERCISE_MODEL_VERSION,LEGACY_EXERCISE_MODEL_VERSION]);
     exerciseFields.exerciseModelVersion=version;
     const legacy=version===LEGACY_EXERCISE_MODEL_VERSION;
+    const duration=version===EXERCISE_MODEL_VERSION?15:1;
     const age=num(r.ageYears,150,true),sex=choice(r.sex,['male','female'] as const);
     const available=age>=6 && age<60;
     if(!legacy) {
@@ -113,15 +114,15 @@ function energyFields(r: Record<string, unknown>): Partial<CloudRun> {
       const e=obj(input),itemType=choice(str(e.itemType),['SHOES','DUMBBELL','ROPE'] as const),count=num(e.count,10,true);
       if(!count)fail();
       if(legacy) {if(e.kcalPerPickup!==30)fail();return {itemType,count,kcalPerPickup:30};}
-      const reference=exerciseReference(age,itemType);
-      if(e.durationMinutes!==1 || e.basis!=='gross' || e.estimated!==true)fail();
+      const reference=exerciseReference(age,itemType,duration);
+      if(e.durationMinutes!==duration || e.basis!=='gross' || e.estimated!==true)fail();
       if(!reference) {
         if(e.kcalPerPickup!==null || e.metValue!==null || e.metKind!==null || e.activityCode!=='' || e.activityLabel!==exerciseReference(10,itemType)!.activityLabel || e.sourceUrl!==exerciseReference(10,itemType)!.sourceUrl)fail();
-        return {itemType,count,kcalPerPickup:null,durationMinutes:1,basis:'gross',estimated:true,activityCode:'',metValue:null,metKind:null,activityLabel:e.activityLabel as string,sourceUrl:e.sourceUrl as string};
+        return {itemType,count,kcalPerPickup:null,durationMinutes:duration,basis:'gross',estimated:true,activityCode:'',metValue:null,metKind:null,activityLabel:e.activityLabel as string,sourceUrl:e.sourceUrl as string};
       }
       for(const key of ['activityCode','activityLabel','metValue','metKind','sourceUrl'] as const)if(e[key]!==reference[key])fail();
-      const kcal=num(e.kcalPerPickup,100);
-      const low=exerciseKcalForWeight(age,sex,10,itemType)!,high=exerciseKcalForWeight(age,sex,200,itemType)!;
+      const kcal=num(e.kcalPerPickup,100*duration);
+      const low=exerciseKcalForWeight(age,sex,10,itemType)!*duration,high=exerciseKcalForWeight(age,sex,200,itemType)!*duration;
       if(kcal<low-1e-6 || kcal>high+1e-6)fail();
       const baseline=kcal/reference.metValue!;
       if(commonBaseline!==undefined && Math.abs(baseline-commonBaseline)>1e-6)fail();
@@ -129,7 +130,7 @@ function energyFields(r: Record<string, unknown>): Partial<CloudRun> {
       return {itemType,count,kcalPerPickup:kcal,...reference};
     });
     const count=exercises.reduce((sum,e)=>sum+e.count,0),total=exercises.reduce((sum,e)=>sum+e.count*(e.kcalPerPickup??0),0);
-    const exerciseKcal=num(r.exerciseKcal,1000);
+    const exerciseKcal=num(r.exerciseKcal,1000*duration);
     if(count>10 || new Set(exercises.map(e=>e.itemType)).size!==exercises.length || Math.abs(exerciseKcal-total)>1e-6)fail();
     const net=netGameEnergy(intake,exerciseKcal,exercises.some(e=>e.kcalPerPickup===null));
     if(net===null ? r.netEnergyKcal!==null : typeof r.netEnergyKcal!=='number' || !Number.isFinite(r.netEnergyKcal) || Math.abs(r.netEnergyKcal-net)>1e-6)fail();

@@ -39,7 +39,14 @@ describe('energy presentation states', () => {
     s.record.collectedExercises=[{itemType:'ROPE',count:1,...s.record.exerciseEstimates!.ROPE!,kcalPerPickup:null}];
     s.netEnergyKcal=null;
     const html=renderToStaticMarkup(<EnergyResult snapshot={s}/>);
-    expect(html).toContain('เทียบเท่า 1 นาที');expect(html).toContain('ยังประมาณครบไม่ได้');
+    expect(html).toContain('เทียบเท่า 15 นาที');expect(html).toContain('ยังประมาณครบไม่ได้');
     expect(html).toContain('ยังไม่มีค่าประมาณ');expect(html).not.toContain('−0');
+  });
+  it('preserves the saved one-minute label and deduction on older results', () => {
+    const s=make().snapshot();
+    s.record.exerciseModelVersion='nccor-youth+adult-met-gross-1min-v1';
+    s.record.collectedExercises=[{itemType:'ROPE',count:1,...s.record.exerciseEstimates!.ROPE!,durationMinutes:1,kcalPerPickup:6.3}];
+    const html=renderToStaticMarkup(<EnergyResult snapshot={s}/>);
+    expect(html).toContain('เทียบเท่า 1 นาที');expect(html).toContain('−6.3');expect(html).not.toContain('15 นาที');
   });
 });

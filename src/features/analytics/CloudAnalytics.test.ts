@@ -32,7 +32,7 @@ describe('local survey and atomic delivery queue', () => {
     const received:unknown[]=[];
     const send=async(_url:RequestInfo|URL,init?:RequestInit)=>{
       if(init?.method)received.push(JSON.parse(String(init.body)));
-      return Response.json(init?.method?{ok:true}:{enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2});
+      return Response.json(init?.method?{ok:true}:{enabled:true,runSchemaVersion:2,exerciseEnergyVersion:3});
     };
     const sync=new AnalyticsSync(reloaded,send);expect(await sync.flush()).toBe('synced');await sync.flush();
     expect(received.filter(p=>(p as {kind:string}).kind==='feedback')).toEqual([expect.objectContaining({rating:4,comment:'อยากได้อาหารเพิ่ม 🍎\nกระโดดสนุกดี'})]);
@@ -65,7 +65,7 @@ describe('local survey and atomic delivery queue', () => {
     const sent:string[]=[];
     const send=async(_url:RequestInfo|URL,init?:RequestInit)=>{
       if(init?.method)sent.push(JSON.parse(String(init.body)).kind);
-      return Response.json(init?.method?{ok:true}:{enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2});
+      return Response.json(init?.method?{ok:true}:{enabled:true,runSchemaVersion:2,exerciseEnergyVersion:3});
     };
     expect(await new AnalyticsSync(repo,send).flush()).toBe('synced');
     expect(sent.filter(kind=>kind==='feedback')).toHaveLength(2);
@@ -123,15 +123,17 @@ describe('local survey and atomic delivery queue', () => {
   });
   it('validates exercise deductions, negative net energy and pre-exercise snapshots', () => {
     const source=cloudRun(run());
-    const record={...source,foodIntakeKcal:0,collectedFoods:[],exerciseKcal:6.297354861111111,netEnergyKcal:-6.297354861111111,
+    const record={...source,foodIntakeKcal:0,collectedFoods:[],exerciseKcal:94.46032291666667,netEnergyKcal:-94.46032291666667,
       collectedExercises:[{itemType:'ROPE',count:1,...estimateExerciseEnergy(profile).exerciseEstimates.ROPE}]};
-    expect(validatePayload({kind:'run',run:record})).toMatchObject({run:{exerciseKcal:6.297354861111111,netEnergyKcal:-6.297354861111111}});
+    expect(validatePayload({kind:'run',run:record})).toMatchObject({run:{exerciseKcal:94.46032291666667,netEnergyKcal:-94.46032291666667}});
     for(const patch of [{exerciseKcal:31},{netEnergyKcal:0},{exerciseModelVersion:'fake'},
       {collectedExercises:[{itemType:'APPLE',count:1,kcalPerPickup:30}]},
       {collectedExercises:[{itemType:'ROPE',count:1.5,kcalPerPickup:30}]},
       {collectedExercises:[{itemType:'ROPE',count:11,kcalPerPickup:30}]},
       {collectedExercises:[{itemType:'ROPE',count:1,kcalPerPickup:300}]}])
       expect(()=>validatePayload({kind:'run',run:{...record,...patch}})).toThrow();
+    const oldMinute={...record,exerciseModelVersion:'nccor-youth+adult-met-gross-1min-v1',exerciseKcal:6.297354861111111,netEnergyKcal:-6.297354861111111,collectedExercises:record.collectedExercises.map(e=>({...e,durationMinutes:1,kcalPerPickup:e.kcalPerPickup!/15}))};
+    expect(validatePayload({kind:'run',run:oldMinute})).toMatchObject({run:{exerciseModelVersion:oldMinute.exerciseModelVersion,exerciseKcal:6.297354861111111}});
     const previous={...source};delete previous.exerciseModelVersion;delete previous.exerciseKcal;delete previous.netEnergyKcal;delete previous.collectedExercises;delete previous.exerciseEnergyStatus;delete previous.exerciseEnergyReason;
     expect(validatePayload({kind:'run',run:previous})).toMatchObject({run:{foodIntakeKcal:source.foodIntakeKcal}});
     expect(()=>validatePayload({kind:'run',run:{...previous,exerciseKcal:30}})).toThrow();
@@ -165,11 +167,17 @@ describe('delivery through the public synchronization boundary', () => {
     expect(await new AnalyticsSync(repo,send).flush()).toBe('pending');expect(send).toHaveBeenCalledTimes(1);
     expect((await repo.analyticsData()).outbox.every(e=>e.state==='pending')).toBe(true);
   });
+  it('holds 15-minute exercise runs and ratings against the one-minute API', async () => {
+    const repo=new RunRepository(),record=run();await repo.saveRun(record,1);await repo.answerSurvey(record.runId,4);
+    const send=vi.fn(async()=>Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2}));
+    expect(await new AnalyticsSync(repo,send).flush()).toBe('pending');expect(send).toHaveBeenCalledTimes(1);
+    expect((await repo.analyticsData()).outbox.every(e=>e.state==='pending')).toBe(true);
+  });
   it('uses the browser fetch function without binding it to the synchronization instance', async () => {
     const repo = new RunRepository(); await repo.saveRun(run(), 1);
     const hostFetch = vi.fn(async function(this: unknown, _url: RequestInfo | URL, init?: RequestInit) {
       if (this instanceof AnalyticsSync) throw new TypeError('Illegal invocation');
-      return Response.json(init?.method ? { ok: true } : { enabled: true, runSchemaVersion: 2, exerciseEnergyVersion: 2 });
+      return Response.json(init?.method ? { ok: true } : { enabled: true, runSchemaVersion: 2, exerciseEnergyVersion: 3 });
     });
     vi.stubGlobal('fetch', hostFetch);
     expect(await new AnalyticsSync(repo).flush()).toBe('synced');
@@ -180,7 +188,7 @@ describe('delivery through the public synchronization boundary', () => {
     await repo.prepareSurvey(third.runId);await repo.answerSurvey(third.runId,4);
     const accepted=new Set<string>(), calls:string[]=[];let lose=true;
     const send=vi.fn(async (_url: RequestInfo | URL, init?:RequestInit)=>{
-      if(!init?.method)return Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2});
+      if(!init?.method)return Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:3});
       const p=JSON.parse(String(init.body));const id=p.kind==='run'?p.run.runId:p.kind==='event'?p.eventId:'feedback';calls.push(p.kind);accepted.add(id);
       if(lose){lose=false;throw new Error('lost acknowledgement');}return Response.json({ok:true});
     });
@@ -201,7 +209,7 @@ describe('delivery through the public synchronization boundary', () => {
     const tx=db.transaction('outbox','readwrite');
     tx.objectStore('outbox').put({id:'old-event',playerId:profile.playerId,createdAt:1,attempts:0,nextAttemptAt:0,state:'pending',payload:{kind:'event',eventId:crypto.randomUUID(),contextRunId:record.runId,surveyVersion:'enjoyment-v1',event:'shown',occurredAt:record.endedAt}});
     await new Promise<void>(resolve=>{tx.oncomplete=()=>resolve();});db.close();
-    const kinds:string[]=[]; const send=async(_url:RequestInfo|URL,init?:RequestInit)=>{if(!init?.method)return Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2});kinds.push(JSON.parse(String(init.body)).kind);return Response.json({ok:true});};
+    const kinds:string[]=[]; const send=async(_url:RequestInfo|URL,init?:RequestInit)=>{if(!init?.method)return Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:3});kinds.push(JSON.parse(String(init.body)).kind);return Response.json({ok:true});};
     expect(await new AnalyticsSync(repo,send).flush()).toBe('synced');expect(kinds).toEqual(['run']);
   });
   it('accepts pending v1 scores without fabricating name or BMI', () => {
@@ -210,14 +218,14 @@ describe('delivery through the public synchronization boundary', () => {
   });
   it('stops automatic retries for permanent validation failures and offers explicit retry', async () => {
     const repo=new RunRepository();await repo.saveRun(run(),1);
-    const send=vi.fn(async(_url:RequestInfo|URL,init?:RequestInit)=>init?.method?Response.json({error:'invalid'},{status:400}):Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2}));
+    const send=vi.fn(async(_url:RequestInfo|URL,init?:RequestInit)=>init?.method?Response.json({error:'invalid'},{status:400}):Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:3}));
     const sync=new AnalyticsSync(repo,send);expect(await sync.flush()).toBe('error');await sync.flush();
     expect(send.mock.calls.filter(([,init])=>init?.method)).toHaveLength(1);
     await repo.retryAnalytics();await sync.flush();expect(send.mock.calls.filter(([,init])=>init?.method)).toHaveLength(2);
   });
   it('does not send captured pending rows after local data was cleared', async () => {
     const repo=new RunRepository();await repo.saveRun(run(),1);
-    const send=vi.fn(async(_url:RequestInfo|URL,init?:RequestInit)=>{if(!init?.method){await repo.clear();return Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:2});}return Response.json({ok:true});});
+    const send=vi.fn(async(_url:RequestInfo|URL,init?:RequestInit)=>{if(!init?.method){await repo.clear();return Response.json({enabled:true,runSchemaVersion:2,exerciseEnergyVersion:3});}return Response.json({ok:true});});
     expect(await new AnalyticsSync(repo,send).flush()).toBe('synced');
     expect(send.mock.calls.filter(([,init])=>init?.method)).toHaveLength(0);
   });

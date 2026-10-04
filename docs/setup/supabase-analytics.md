@@ -62,3 +62,7 @@ RPC ตรวจ catalog/portion counts และยอดรวม; การ�
 Applied `20261004000300_exercise_energy.sql` และ `register-exercise-energy.sql` บน live วันที่ 4 ตุลาคม 2026 ยืนยัน schema/history พร้อมทดสอบ `supabase/tests/exercise-energy.sql` ผ่านและ rollback ข้อมูลทดลองครบ จำนวนข้อมูลเดิมคงที่ 23 score / 4 feedback เพิ่ม exercise_kcal, exercise_model_version, exercise_energy_status/reason, collected_exercises และ generated net_energy_kcal คง food_intake_kcal เป็นยอดอาหารจริงตาม snapshot
 
 ค่ากิจกรรมใช้ NCCOR Youth Compendium + Schofield สำหรับ 6–18 ปี และ 2024 Adult Compendium สำหรับ 19–59 ปี: 1 pickup แทนกิจกรรมจำลอง 1 นาที รองรับ null/unavailable และตรวจ source/code/MET/เวลา/จำนวน/ยอดรวม ไม่ส่งน้ำหนักหรือส่วนสูงโดยตรง ต้องลง migration ก่อน API ที่ประกาศ exerciseEnergyVersion=2 Client จะรอใน outbox จนพร้อม โดยไม่ทิ้งค่าหักของรอบใหม่ ดู [แหล่งอ้างอิง](../research/exercise-energy-reference.md) และ [QA](../qa/kcal-game-verification.md)
+
+## Balance 15 นาที — รออนุมัติขึ้น live
+
+Migration `20261004000400_exercise_game_balance.sql` และ register script เตรียมสำหรับ model `nccor-youth+adult-met-gross-15min-v2` กับ API `exerciseEnergyVersion=3` แล้ว ยังไม่ applied live เนื่องจาก auto-review ต้องการยืนยันระยะเวลาและ live mutation ชัดเจน Client เก็บรอบใหม่ไว้ใน outbox เมื่อพบ API รุ่น 2; migration ใหม่ยอมรับค่ารอบ 1 นาทีเดิมโดยไม่แก้ประวัติ ดู [แผนและ validation](../plans/kcal-game-balance.md)

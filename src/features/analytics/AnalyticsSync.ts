@@ -1,4 +1,5 @@
 import type { RunRepository } from './RunRepository';
+import { EXERCISE_MODEL_VERSION } from '../../game/learning/ExerciseEnergy';
 
 export type SyncStatus = 'checking' | 'unconfigured' | 'offline' | 'pending' | 'synced' | 'error';
 export class AnalyticsSync {
@@ -15,6 +16,7 @@ export class AnalyticsSync {
     if (typeof navigator !== 'undefined' && !navigator.onLine) return 'offline';
     let acceptsEnergy = false;
     let acceptsExercise = false;
+    let acceptsExerciseBalance = false;
     try {
       const config = await this.send('/api/analytics/runs', { signal: AbortSignal.timeout(10_000), cache: 'no-store' });
       if (config.status === 503 || config.status === 404) return 'unconfigured';
@@ -23,7 +25,8 @@ export class AnalyticsSync {
       if (!config.headers.get('content-type')?.includes('application/json')) return 'unconfigured';
       const body = await config.json(); if (body.enabled !== true) return 'unconfigured';
       acceptsEnergy = body.runSchemaVersion === 2;
-      acceptsExercise = body.exerciseEnergyVersion === 2;
+      acceptsExercise = body.exerciseEnergyVersion >= 2;
+      acceptsExerciseBalance = body.exerciseEnergyVersion >= 3;
     } catch { return 'error'; }
     // Retire previously queued impression/skip events locally. Only scores and submitted stars leave the device.
     for (const item of outbox.filter(e => e.payload.kind === 'event' && e.state !== 'synced')) {
@@ -39,6 +42,7 @@ export class AnalyticsSync {
       // Older APIs discard unknown fields. Keep kcal runs queued until the new contract is available.
       if (item.payload.kind === 'run' && item.payload.run.runSchemaVersion === 2 && !acceptsEnergy) continue;
       if (item.payload.kind === 'run' && item.payload.run.exerciseModelVersion && !acceptsExercise) continue;
+      if (item.payload.kind === 'run' && item.payload.run.exerciseModelVersion === EXERCISE_MODEL_VERSION && !acceptsExerciseBalance) continue;
       if (item.payload.kind !== 'run' && !deliveredRuns.has(item.payload.contextRunId)) continue;
       // Another tab may have cleared local data or delivered the row since this batch began.
       const current = await this.repository.analyticsData();

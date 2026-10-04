@@ -5,7 +5,7 @@ import { PoseMapper, type PoseOutput } from '../../game/camera/PoseMapper';
 import { RunSession, LEVEL_DISTANCE, COURSE_SPEED } from '../../game/learning/RunSession';
 import { createQuestionSet, DEMO_BANK } from '../../game/learning/QuestionDeck';
 import type { InputMode, Lane, Profile, Snapshot } from '../../game/learning/types';
-import { RunRepository, highScore, type StoredData } from '../analytics/RunRepository';
+import { RunRepository, type StoredData } from '../analytics/RunRepository';
 import { ProfileForm, newProfile } from '../profile/ProfileForm';
 import './LearningGame.css';
 import { Practice } from './Practice';
@@ -23,7 +23,7 @@ import { formatKcal } from '../health/energy';
 import { formatGameKcal } from '../../game/learning/ExerciseEnergy';
 import { pickupLabel } from '../../game/learning/PickupLabel';
 import { FeedbackPanel } from '../analytics/FeedbackPanel';
-import { AnalyticsSync, deliveryText, type SyncStatus } from '../analytics/AnalyticsSync';
+import { AnalyticsSync } from '../analytics/AnalyticsSync';
 
 type Screen = 'intro' | 'profile' | 'ready' | 'tutorial' | 'armed' | 'warmup' | 'run' | 'result';
 const emptyData: StoredData = { profiles: [], runs: [], bank: null };
@@ -40,8 +40,6 @@ export function LearningGame() {
   const sessionRef = useRef<RunSession | null>(null);
   const repository = useRef(new RunRepository());
   const analyticsSync = useRef(new AnalyticsSync(repository.current));
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>('checking');
-  const [cloudRecordCount, setCloudRecordCount] = useState(0);
   const cameraRef = useRef<CameraSession | null>(null);
   const mapper = useRef(new PoseMapper());
   const generation = useRef(0);
@@ -137,8 +135,8 @@ export function LearningGame() {
 
   const refresh = async () => { const next = await repository.current.load(); setData(next); return next; };
   const syncAnalytics = async () => {
-    try { setSyncStatus(await analyticsSync.current.flush()); setCloudRecordCount((await repository.current.analyticsData()).outbox.length); }
-    catch { setSyncStatus('error'); }
+    try { await analyticsSync.current.flush(); }
+    catch { /* Keep delivery queued for the periodic retry without adding result-screen status. */ }
   };
   useEffect(() => {
     void syncAnalytics();
@@ -495,16 +493,14 @@ export function LearningGame() {
       }} /></>}
       {screen === 'armed' && <section className="lr-gesture-start"><p className="lr-kicker">{recovery.current.active ? `เกมพักไว้ · ${profile?.nickname}` : `พร้อมออกวิ่ง · ${profile?.nickname}`}</p>{recovery.current.active && <p className="lr-recovery-note">{pauseReason} · {warmup.current ? 'ฝึกต่อจากขั้นเดิม' : `คำถาม ${Math.min((snapshot?.questionIndex ?? 0)+1,10)} / 10`}</p>}<h1>{cameraReady ? (recovery.current.active ? 'ยกมือค้างไว้เพื่อเล่นต่อ' : 'ยกมือค้างไว้เพื่อเริ่ม') : (recovery.current.active ? 'ตั้งท่ากลางใหม่ก่อนเล่นต่อ' : 'ตั้งท่ากลางก่อนเริ่ม')}</h1><div className="lr-hold-ring" role="progressbar" aria-label={recovery.current.active ? 'ยกมือค้างเพื่อเล่นต่อ' : 'ยกมือค้างเพื่อเริ่ม'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(holdProgress*100)} style={{ '--hold': `${holdProgress*360}deg` } as React.CSSProperties}><span>✋</span></div><p className="lr-gesture-instruction">{holdProgress > 0 ? 'ค้างไว้อีกนิด…' : cameraReady ? 'ลดมือลงก่อน แล้วยกมือข้างใดข้างหนึ่งเหนือไหล่ค้าง 1.5 วินาที' : cameraStatus}</p><div className="lr-actions"><button className="secondary" onClick={beginCamera}>ตั้งกล้องใหม่</button><button disabled={!cameraReady || busy} onClick={() => void start(activeProfile.current ?? undefined)}>{recovery.current.active ? 'เล่นต่อด้วยปุ่ม' : 'เริ่มด้วยปุ่ม'}</button><button className="secondary" onClick={() => { chooseMode('manual'); void start(activeProfile.current ?? undefined); }}>ใช้ปุ่ม / ปัดจอ</button><button className="lr-link" onClick={() => { hold.current.reset();leaveRun(); }}>กลับ</button></div></section>}
       {screen === 'tutorial' && <>
-        <p className="lr-kicker">ก่อนออกวิ่ง</p><h1>เลือกให้พอดี ตอบให้เข้าใจ</h1><ol className="lr-tutorial"><li><strong>เลือกเลน</strong><p>กล้อง: เลื่อนไหล่ซ้าย–ขวาจากท่ากลาง · ปุ่ม: ← / → หรือ A / D เลื่อนทีละเลน · มือถือปัดซ้าย–ขวา กระโดดเก็บสัญลักษณ์ออกกำลังกาย: กล้องกระโดดเบา ๆ · ปุ่ม Space / ↑ · มือถือปัดขึ้น · กระโดดข้ามอาหารบนพื้นโดยไม่เก็บ</p></li><li><strong>เลือกของให้สมดุล</strong><p>อาหารทุกชนิดเพิ่ม kcal ตามหน่วยบริโภค · น้ำเปล่า 0 kcal · กระโดดเก็บสัญลักษณ์ออกกำลังกายได้ แต่ไม่หักพลังงานอาหาร · เก็บพลาดไม่เปลี่ยนค่า</p></li><li><strong>วิ่งเข้าประตูคำตอบ</strong><p>คำถามและคำตอบอยู่ด้านบน มีประตูแสดงคำตอบ เลือกเลนในช่วง 6 วินาทีก่อนถึงประตู เกมวิ่งต่อและล็อกคำตอบเมื่อผ่านประตู</p></li><li><strong>ผิดติดกัน 3 ข้อจบรอบ</strong><p>ตอบถูกรีเซ็ตการผิดติดกัน ประตูคำถามข้อ 10 คือเส้นชัย จบแล้วทบทวนเหตุผลได้ทั้งเมื่อแพ้และถึงเส้นชัย</p></li></ol><Practice mode={mode} cameraReady={cameraReady} detectedLane={detectedLane} /><p className="lr-muted">เริ่มอาหารสะสมที่ 0 kcal เป้าพลังงานต่อวันคำนวณจากเพศ อายุ ส่วนสูง และน้ำหนัก โดยสมมติว่ามีกิจกรรมน้อย ยอดอาหารในเกมไม่ใช่บันทึกอาหารจริงทั้งวัน</p><button onClick={() => setScreen('ready')}>เข้าใจแล้ว →</button>
+        <p className="lr-kicker">ก่อนออกวิ่ง</p><h1>เลือกให้พอดี ตอบให้เข้าใจ</h1><ol className="lr-tutorial"><li><strong>เลือกเลน</strong><p>กล้อง: เลื่อนไหล่ซ้าย–ขวาจากท่ากลาง · ปุ่ม: ← / → หรือ A / D เลื่อนทีละเลน · มือถือปัดซ้าย–ขวา กระโดดเก็บสัญลักษณ์ออกกำลังกาย: กล้องกระโดดเบา ๆ · ปุ่ม Space / ↑ · มือถือปัดขึ้น · กระโดดข้ามอาหารบนพื้นโดยไม่เก็บ</p></li><li><strong>เลือกของให้สมดุล</strong><p>อาหารทุกชนิดเพิ่ม kcal ตามหน่วยบริโภค · น้ำเปล่า 0 kcal · กระโดดเก็บสัญลักษณ์ออกกำลังกายเพื่อลด kcal สุทธิ · 1 ชิ้นแทนกิจกรรมจำลอง 15 นาที · เก็บพลาดไม่เปลี่ยนค่า</p></li><li><strong>วิ่งเข้าประตูคำตอบ</strong><p>คำถามและคำตอบอยู่ด้านบน มีประตูแสดงคำตอบ เลือกเลนในช่วง 6 วินาทีก่อนถึงประตู เกมวิ่งต่อและล็อกคำตอบเมื่อผ่านประตู</p></li><li><strong>ผิดติดกัน 3 ข้อจบรอบ</strong><p>ตอบถูกรีเซ็ตการผิดติดกัน ประตูคำถามข้อ 10 คือเส้นชัย จบแล้วทบทวนเหตุผลได้ทั้งเมื่อแพ้และถึงเส้นชัย</p></li></ol><Practice mode={mode} cameraReady={cameraReady} detectedLane={detectedLane} /><p className="lr-muted">เริ่มอาหารสะสมที่ 0 kcal เป้าพลังงานต่อวันคำนวณจากเพศ อายุ ส่วนสูง และน้ำหนัก โดยสมมติว่ามีกิจกรรมน้อย ยอดอาหารในเกมไม่ใช่บันทึกอาหารจริงทั้งวัน</p><button onClick={() => setScreen('ready')}>เข้าใจแล้ว →</button>
       </>}
       {result && <>
         <p className="lr-kicker">ผลรอบนี้</p><h1>{s.record.outcome === 'completed' ? 'ถึงเส้นชัยแล้ว!' : 'มาลองทบทวนกัน'}</h1>
         <p>{s.record.outcome === 'game_over' ? 'Game Over · ตอบผิดติดกัน 3 ข้อ' : s.record.outcome === 'completed' ? 'จบภารกิจเมืองสมดุล' : 'ออกจากรอบก่อนจบ'}</p>
-        <div className="lr-result-score"><strong>{s.record.score.toLocaleString('th-TH')}</strong><span>คะแนนรอบนี้ · สูงสุด {highScore(data.runs, s.record).toLocaleString('th-TH')}</span></div>
-        {!sessionOnly && !storageError && <><p className="lr-cloud-status" role="status">{deliveryText(syncStatus, cloudRecordCount > 0)}{syncStatus === 'error' && <button className="lr-link" onClick={async () => { await repository.current.retryAnalytics(); void syncAnalytics(); }}>ลองส่งใหม่</button>}</p>
-          <FeedbackPanel key={s.record.runId} runId={s.record.runId} repository={repository.current} waitForSave={() => writeQueue.current} onChange={() => void syncAnalytics()} /></>}
+        {!sessionOnly && !storageError && <FeedbackPanel key={s.record.runId} runId={s.record.runId} repository={repository.current} waitForSave={() => writeQueue.current} onChange={() => void syncAnalytics()} />}
         {sessionOnly && <p className="lr-muted">เล่นได้เฉพาะครั้งนี้ · ยังบันทึกคะแนนและดาวถาวรไม่ได้</p>}
-        <div className="lr-stat-row"><div><small>คำถามที่ตอบ</small><strong>{s.record.answers.length} / 10</strong><span>ยังไม่ถึง {s.record.unreachedCount} ข้อ</span></div><div><small>ตอบถูก</small><strong>{s.record.correctCount} / {s.record.answers.length}</strong><span>{s.record.answers.length ? Math.round(s.record.correctCount / s.record.answers.length * 100) + '%' : 'ยังไม่มีข้อมูล'}</span></div><div><small>ระยะทางที่เล่น</small><strong>{Math.round(s.distance / LEVEL_DISTANCE * 100)}%</strong><span>โบนัสจากระยะทาง ไม่ขึ้นกับ kcal</span></div></div>
+        <div className="lr-stat-row"><div><small>คำถามที่ตอบ</small><strong>{s.record.answers.length} / 10</strong><span>ยังไม่ถึง {s.record.unreachedCount} ข้อ</span></div><div><small>ตอบถูก</small><strong>{s.record.correctCount} / {s.record.answers.length}</strong><span>{s.record.answers.length ? Math.round(s.record.correctCount / s.record.answers.length * 100) + '%' : 'ยังไม่มีข้อมูล'}</span></div><div><small>ระยะทางที่เล่น</small><strong>{Math.round(s.distance / LEVEL_DISTANCE * 100)}%</strong><span>ความคืบหน้าในรอบนี้</span></div></div>
         {s.record.outcome === 'game_over' && <div className="lr-last-answer"><strong>เฉลยข้อสุดท้าย: {s.lastAnswer?.options.find(o => o.optionId === s.lastAnswer?.correctOptionId)?.text}</strong><p>{s.lastAnswer?.explanation}</p></div>}
         <EnergyResult snapshot={s} /><h2>ทบทวนคำตอบ</h2>{s.record.answers.map(a => <details className="lr-review" key={a.index}><summary><span className={a.isCorrect ? 'lr-correct' : 'lr-wrong'}>{a.isCorrect ? '✓' : '↻'}</span> {a.index + 1}. {a.prompt}</summary><p>เลือก: {a.options.find(o => o.optionId === a.selectedOptionId)?.text}</p><p>คำตอบ: <strong>{a.options.find(o => o.optionId === a.correctOptionId)?.text}</strong></p><p>{a.explanation}</p></details>)}
         {s.record.unreachedCount > 0 && <p className="lr-muted">อีก {s.record.unreachedCount} ข้อยังไม่ถึง ไม่ถูกนับว่าผิด</p>}

@@ -17,9 +17,9 @@ describe('exercise collection commands',()=>{
     expect(run.jump()).toBe(true);expect(run.jump()).toBe(false);run.advance(.25);
     const after=run.snapshot();expect(after.foodIntakeKcal).toBe(before.foodIntakeKcal);expect(after.record.itemCounts[item.type]).toBe(1);
     expect(after.dailyEnergyKcal).toBe(before.dailyEnergyKcal);
-    const expected=type==='SHOES'?7.017872:type==='DUMBBELL'?2.845083:6.733364;
+    const expected=type==='SHOES'?105.268083333:type==='DUMBBELL'?42.67625:101.000458333;
     expect(after.exerciseKcal-before.exerciseKcal).toBeCloseTo(expected,5);expect(after.netEnergyKcal!-before.netEnergyKcal!).toBeCloseTo(-expected,5);
-    expect(after.record.collectedExercises).toContainEqual(expect.objectContaining({itemType:item.type,count:1,kcalPerPickup:expect.closeTo(expected,5),durationMinutes:1,basis:'gross'}));
+    expect(after.record.collectedExercises).toContainEqual(expect.objectContaining({itemType:item.type,count:1,kcalPerPickup:expect.closeTo(expected,5),durationMinutes:15,basis:'gross'}));
     expect(run.drainEvents().filter(e=>e.kind==='item')).toEqual([{kind:'item',id:item.id,type:item.type,deltaKcal:expect.closeTo(-expected,5)}]);expect(run.drainEvents()).toEqual([]);
     expect(after.record.jumpAttempts).toBe(1);
   });
@@ -40,7 +40,7 @@ describe('exercise collection commands',()=>{
     const run=new RunSession(changing,createQuestionSet(DEMO_BANK,144,{contentVersion:DEMO_BANK.contentVersion,counts:{}},42,true),{runId:'snapshot',startedAt:'2026-10-04',seed:42,demo:true,contentVersion:DEMO_BANK.contentVersion,blueprintVersion:DEMO_BANK.blueprintVersion,mode:'manual'});
     changing.weightKg=80;
     const item=approachExercise(run,'ROPE');run.drainEvents();run.jump();run.advance(.25);
-    expect(run.snapshot().record.collectedExercises).toContainEqual(expect.objectContaining({itemType:item.type,kcalPerPickup:expect.closeTo(6.733364,5)}));
+    expect(run.snapshot().record.collectedExercises).toContainEqual(expect.objectContaining({itemType:item.type,kcalPerPickup:expect.closeTo(101.000458333,5)}));
   });
   it('supports unbounded demo ages and keeps old bank eligibility',()=>{
     const deck={contentVersion:DEMO_BANK.contentVersion,counts:{}};

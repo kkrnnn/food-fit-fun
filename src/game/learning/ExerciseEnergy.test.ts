@@ -2,12 +2,12 @@ import { expect, it } from 'vitest';
 import { estimateExerciseEnergy, exerciseKcalForWeight, EXERCISE_TYPES, formatGameKcal } from './ExerciseEnergy';
 import type { Profile } from './types';
 const profile:Profile={playerId:'exercise',nickname:'test',version:1,sex:'male',ageMonths:144,heightCm:140,weightKg:40,activity:'',avatar:'mint'};
-it('matches independently calculated NCCOR one-minute examples',()=>{
+it('scales independent NCCOR minute estimates into 15-minute game pickups',()=>{
   const estimate=estimateExerciseEnergy(profile);
-  expect(estimate.exerciseEstimates.SHOES?.kcalPerPickup).toBeCloseTo(7.017872,5);
-  expect(estimate.exerciseEstimates.DUMBBELL?.kcalPerPickup).toBeCloseTo(2.845083,5);
-  expect(estimate.exerciseEstimates.ROPE?.kcalPerPickup).toBeCloseTo(6.733364,5);
-  expect(estimate.exerciseEstimates.ROPE).toMatchObject({durationMinutes:1,metValue:7.1,metKind:'METy',activityCode:'10260X',basis:'gross',estimated:true});
+  expect(estimate.exerciseEstimates.SHOES?.kcalPerPickup).toBeCloseTo(105.268083333,5);
+  expect(estimate.exerciseEstimates.DUMBBELL?.kcalPerPickup).toBeCloseTo(42.67625,5);
+  expect(estimate.exerciseEstimates.ROPE?.kcalPerPickup).toBeCloseTo(101.000458333,5);
+  expect(estimate.exerciseEstimates.ROPE).toMatchObject({durationMinutes:15,metValue:7.1,metKind:'METy',activityCode:'10260X',basis:'gross',estimated:true});
   expect(formatGameKcal(-6.733364)).toBe('-6.7');
 });
 it.each([[6,6.8],[10,7.4],[13,7.9],[16,8.4],[18,8.4],[19,7.5],[59,7.5]])('uses the correct activity table at age %s',(age,met)=>{

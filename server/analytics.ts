@@ -30,7 +30,7 @@ async function boundedJson(req: Request): Promise<unknown> {
   } finally { reader.releaseLock(); }
 }
 export async function handleAnalytics(req: Request, route: 'runs' | 'feedback', env: AnalyticsEnv = environment(), send: typeof fetch = fetch): Promise<Response> {
-  if (req.method === 'GET' && route === 'runs') return response(configured(env) ? 200 : 503, { enabled: configured(env), runSchemaVersion: 2, exerciseEnergyVersion: 2 });
+  if (req.method === 'GET' && route === 'runs') return response(configured(env) ? 200 : 503, { enabled: configured(env), runSchemaVersion: 2, exerciseEnergyVersion: 3 });
   if (req.method !== 'POST') return response(405, { error: 'method_not_allowed' });
   if (!configured(env)) return response(503, { error: 'not_configured' });
   const origin = req.headers.get('origin');

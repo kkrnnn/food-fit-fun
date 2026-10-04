@@ -44,6 +44,6 @@ describe('referenced food portions through gameplay commands', () => {
     expect(pickupLabel('BANANA', 110)).toContain('+110 kcal');
     expect(pickupLabel('WATER', 0)).toContain('0 kcal');
     expect(pickupLabel('WATER', 0)).not.toContain('+');
-    expect(pickupLabel('SHOES', -6.733364)).toContain('-6.7 kcal');expect(pickupLabel('SHOES', -6.733364)).toContain('กิจกรรมจำลอง 1 นาที');expect(pickupLabel('SHOES', null)).toContain('ยังไม่มีค่าประมาณ');
+    expect(pickupLabel('SHOES', -6.733364)).toContain('-6.7 kcal');expect(pickupLabel('SHOES', -6.733364)).toContain('กิจกรรมจำลอง 15 นาที');expect(pickupLabel('SHOES', null)).toContain('ยังไม่มีค่าประมาณ');
   });
 });
