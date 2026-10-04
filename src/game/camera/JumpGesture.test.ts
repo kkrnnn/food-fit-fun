@@ -10,6 +10,23 @@ function pose(rise=0, hands=false): PoseLandmark[] {
   return points;
 }
 describe('torso jump gesture',()=>{
+  it('recognizes a smaller torso rise with gentle tuning without recognizing still-body jitter', () => {
+    const gentle = new JumpGesture('gentle'), normal = new JumpGesture();
+    for (const detector of [gentle, normal]) {
+      for (let time = 0; time <= 500; time += 125) expect(detector.ingest(pose(.005), time, true)).toBe(false);
+    }
+    expect(gentle.ingest(pose(.035), 625, true)).toBe(true);
+    expect(normal.ingest(pose(.035), 625, true)).toBe(false);
+  });
+  it('requires a fresh neutral baseline after changing sensitivity', () => {
+    const detector = new JumpGesture();
+    for (let time = 0; time <= 500; time += 125) detector.ingest(pose(), time, true);
+    detector.setSensitivity('gentle');
+    expect(detector.ingest(pose(.05), 625, true)).toBe(false);
+    detector.ingest(pose(), 750, true);
+    for (let time = 875; time <= 1375; time += 125) detector.ingest(pose(), time, true);
+    expect(detector.ingest(pose(.05), 1500, true)).toBe(true);
+  });
   it.each([125,66])('emits once and rearms after landing at %sms frames',step=>{
     const d=new JumpGesture();let now=0;
     for(let i=0;i<5;i++){expect(d.ingest(pose(),now,true)).toBe(false);now+=step;}

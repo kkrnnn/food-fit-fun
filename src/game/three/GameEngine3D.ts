@@ -937,6 +937,8 @@ export class GameEngine3D {
     this.particlesMesh.visible = false; // Quiet park air keeps distant food and answer gates readable.
     const moving = snapshot && !snapshot.paused && ['running','quiz_approach','quiz_feedback'].includes(snapshot.phase) && !snapshot.waitingForLane;
     const speed = moving ? (snapshot?.motionSpeed ?? COURSE_SPEED) : 0;
+    const timeline = snapshot?.record.inputTimeline;
+    const cameraInput = timeline?.[timeline.length - 1]?.mode === 'camera';
     // Preserve enough horizontal view for every lane on portrait screens.
     const learningFov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(Math.PI / 6) * Math.max(1, 1.1 / this.camera.aspect)));
     if (Math.abs(this.camera.fov - learningFov) > .01) { this.camera.fov = learningFov; this.camera.updateProjectionMatrix(); }
@@ -971,6 +973,9 @@ export class GameEngine3D {
     (this.playerTorso.material as THREE.MeshStandardMaterial).color.setHex(avatar === 'mint' ? 0x32bfa7 : avatar === 'rose' ? 0xf16e8b : 0xf5b64e);
     this.playerShadow.position.x = this.playerMesh.position.x;
     this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, this.targetX * .18, Math.min(1, dt * 8));
+    // A higher camera view exposes center-lane food above the runner's head.
+    this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, cameraInput ? 5.4 : 3.8, Math.min(1, dt * 8));
+    this.camera.lookAt(this.camera.position.x, 1.4, -16);
     if (moving) {
       this.runAnimTimer += dt * 10;
       const pose = runnerPose(this.runAnimTimer);
@@ -1022,6 +1027,10 @@ export class GameEngine3D {
       entity.z = spec.z;
       entity.mesh.position.z = spec.z;
       if (entity.itemMesh && !spec.door) {
+        // Boost distant silhouettes for standing camera play; return to the
+        // normal clearance near pickup. Scaling does not move the jump target.
+        const distanceBoost = THREE.MathUtils.clamp((-spec.z - 4) / 14, 0, 1);
+        entity.itemMesh.scale.setScalar(cameraInput ? 1.05 + distanceBoost * .5 : 1);
         // Gentle sway keeps recognizable faces visible instead of spinning them edge-on.
         entity.itemMesh.rotation.y = Math.sin(this.runAnimTimer * .8 + (entity.floatPhase ?? 0)) * .18;
       }

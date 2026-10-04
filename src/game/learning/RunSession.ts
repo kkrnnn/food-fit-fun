@@ -13,15 +13,22 @@ export const GATE_SPACING = LEVEL_DISTANCE / 10;
 export const QUIZ_SECONDS = 6;
 export const QUIZ_APPROACH_DISTANCE = COURSE_SPEED * QUIZ_SECONDS;
 export const COURSE_VIEW_DISTANCE = COURSE_SPEED * 14;
-export const LEVEL_VERSION = 'learning-continuous-course-ground-jump-v9';
+export const LEVEL_VERSION = 'learning-camera-exercise-grace-v10';
 export const SCORING_VERSION = 'learning-distance-1500-v3';
+// Pose frames arrive after the physical motion. Keep exercise pickups forgiving
+// without changing the jump arc or the ground-food collision rule.
+export const CAMERA_EXERCISE_EARLY_MS = 1100;
+export const CAMERA_EXERCISE_LATE_MS = 250;
 
 /** Owns every gameplay rule; rendering and input adapters send commands here. */
 export class RunSession {
   private jumpStarted = -Infinity;
+  private pendingExercises: { item: SceneItem; expiresAt: number }[] = [];
   jump(): boolean {
     if (this.paused || !this.controlValid || this.phase === 'terminal' || this.record.activePlayMs-this.jumpStarted < JUMP_COOLDOWN_MS) return false;
-    this.jumpStarted=this.record.activePlayMs; this.record.jumpAttempts=(this.record.jumpAttempts ?? 0)+1; return true;
+    this.jumpStarted=this.record.activePlayMs; this.record.jumpAttempts=(this.record.jumpAttempts ?? 0)+1;
+    this.resolvePendingExercises();
+    return true;
   }
   private phase: Phase = 'running';
   private paused = false;
@@ -64,12 +71,14 @@ export class RunSession {
     if (lane !== this.lane || !valid) this.laneStableMs = 0;
     this.lane = lane;
     this.controlValid = valid;
+    if (!valid) this.cancelPendingExercises();
+    else this.resolvePendingExercises();
   }
-  invalidateControl(): void { this.jumpStarted=-Infinity; this.controlValid = false; this.laneStableMs = 0; }
+  invalidateControl(): void { this.cancelPendingExercises(); this.jumpStarted=-Infinity; this.controlValid = false; this.laneStableMs = 0; }
   setInputMode(mode: InputMode): void {
     if (this.phase === 'terminal') return;
     if (this.record.inputTimeline[this.record.inputTimeline.length - 1]?.mode === mode) return;
-    this.jumpStarted=-Infinity;
+    this.cancelPendingExercises(); this.jumpStarted=-Infinity;
     this.record.inputTimeline.push({ mode, atMs: this.record.activePlayMs });
     this.record.inputModeGroup = 'mixed';
     this.controlValid = mode === 'manual';
@@ -77,7 +86,7 @@ export class RunSession {
   }
   pause(tracking = false): void {
     if (this.paused || this.phase === 'terminal') return;
-    this.jumpStarted=-Infinity;
+    this.cancelPendingExercises(); this.jumpStarted=-Infinity;
     this.paused = true;
     this.trackingPause = tracking;
     if (tracking) this.record.trackingPauseCount++;
@@ -111,8 +120,12 @@ export class RunSession {
       const chosen = row.find(e => e.lane === this.lane);
       row.forEach(e => this.processed.add(e.id));
       const airborne = jumpHeight(jumpProgress(this.record.activePlayMs - this.jumpStarted)) >= GROUND_CLEARANCE_HEIGHT;
-      if (chosen && (isExercise(chosen.type) ? airborne : !airborne)) this.applyItem(chosen);
-      else if (row.some(e => isExercise(e.type))) this.record.exerciseMissed=(this.record.exerciseMissed ?? 0)+1;
+      if (chosen && isExercise(chosen.type) && this.cameraInput()) {
+        const elapsed = this.record.activePlayMs - this.jumpStarted;
+        if (elapsed >= 0 && elapsed <= CAMERA_EXERCISE_EARLY_MS) this.applyItem(chosen);
+        else this.pendingExercises.push({ item: chosen, expiresAt: this.record.activePlayMs + CAMERA_EXERCISE_LATE_MS });
+      } else if (chosen && (isExercise(chosen.type) ? airborne : !airborne)) this.applyItem(chosen);
+      else if (row.some(e => isExercise(e.type))) this.missExercise();
 
     }
     this.travel(end);
@@ -127,6 +140,22 @@ export class RunSession {
     const delta = to - this.record.distance;
     this.record.activePlayMs += delta / COURSE_SPEED * 1000;
     this.record.distance = to;
+    this.resolvePendingExercises();
+  }
+  private cameraInput(): boolean { return this.record.inputTimeline[this.record.inputTimeline.length - 1].mode === 'camera'; }
+  private missExercise(): void { this.record.exerciseMissed = (this.record.exerciseMissed ?? 0) + 1; }
+  private cancelPendingExercises(): void {
+    this.pendingExercises.forEach(() => this.missExercise());
+    this.pendingExercises = [];
+  }
+  private resolvePendingExercises(): void {
+    this.pendingExercises = this.pendingExercises.filter(({ item, expiresAt }) => {
+      if (this.record.activePlayMs > expiresAt || this.lane !== item.lane) { this.missExercise(); return false; }
+      // A fresh jump must begin while the late grace is still open.
+      const crossedAt = expiresAt - CAMERA_EXERCISE_LATE_MS;
+      if (this.cameraInput() && this.controlValid && this.jumpStarted >= crossedAt && this.jumpStarted <= expiresAt) { this.applyItem(item); return false; }
+      return true;
+    });
   }
   private applyItem(item: SceneItem): void {
     this.record.itemCounts[item.type] = (this.record.itemCounts[item.type] ?? 0) + 1;
@@ -181,7 +210,7 @@ export class RunSession {
   visibleItems(): SceneItem[] {
     if (this.phase === 'terminal') return [];
     // Visibility is independent of quiz state: food beyond the gate stays in the scene.
-    return this.items.filter(e => !this.processed.has(e.id) && e.distance > this.record.distance && e.distance - this.record.distance <= COURSE_VIEW_DISTANCE);
+    return this.items.filter(e => this.pendingExercises.some(p => p.item.id === e.id) || (!this.processed.has(e.id) && e.distance > this.record.distance && e.distance - this.record.distance <= COURSE_VIEW_DISTANCE));
   }
   snapshot(): Snapshot {
     return structuredClone({ jumpProgress: jumpProgress(this.record.activePlayMs-this.jumpStarted),

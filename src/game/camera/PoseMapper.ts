@@ -1,3 +1,4 @@
+import { LANE_TUNING, type Sensitivity } from './CameraTuning';
 /** MediaPipe Pose landmark fields used by the game. Coordinates are normalized to the input image. */
 export interface PoseLandmark {
   x: number;
@@ -25,11 +26,13 @@ export interface PoseOutput {
   trackingValid: boolean;
   /** Shoulders have been unusable or absent for at least 300 ms. */
   trackingLost: boolean;
+  calibrationProgress: number;
 }
 
 export interface PoseMapperOptions {
   /** Set true if landmarks were inferred from an already mirrored image. */
   inputMirrored?: boolean;
+  sensitivity?: Sensitivity;
 }
 
 const LEFT_SHOULDER = 11;
@@ -80,6 +83,7 @@ function reliable(point: PoseLandmark | undefined): point is PoseLandmark {
  */
 export class PoseMapper {
   private readonly inputMirrored: boolean;
+  private sensitivity: Sensitivity;
   private lastFrameMs = -Infinity;
   private lastGoodMs = -Infinity;
   private lossHandled = false;
@@ -108,6 +112,12 @@ export class PoseMapper {
 
   constructor(options: PoseMapperOptions = {}) {
     this.inputMirrored = options.inputMirrored ?? false;
+    this.sensitivity = options.sensitivity ?? 'normal';
+  }
+
+  setSensitivity(value: Sensitivity): void {
+    this.sensitivity = value;
+    this.resetGesture();
   }
 
   reset(): void {
@@ -179,7 +189,7 @@ export class PoseMapper {
     const displayedX = this.screenX(shoulders.x);
     const offset = (displayedX - this.neutralX) / this.neutralWidth;
     const dt = this.smoothTimeMs === null ? 0 : Math.max(0, timestampMs - this.smoothTimeMs);
-    const alpha = this.smoothTimeMs === null ? 1 : 1 - Math.exp(-dt / 80);
+    const alpha = this.smoothTimeMs === null ? 1 : 1 - Math.exp(-dt / LANE_TUNING[this.sensitivity].smoothingMs);
     this.smoothedOffset += alpha * (offset - this.smoothedOffset);
     this.smoothTimeMs = timestampMs;
 
@@ -270,13 +280,14 @@ export class PoseMapper {
   }
 
   private desiredLane(offset: number): Lane {
+    const { enter, exit } = LANE_TUNING[this.sensitivity];
     if (this.lane === 1) {
-      if (offset < -0.6) return 0;
-      if (offset > 0.6) return 2;
+      if (offset < -enter) return 0;
+      if (offset > enter) return 2;
       return 1;
     }
-    if (this.lane === 0) return offset > -0.35 ? 1 : 0;
-    return offset < 0.35 ? 1 : 2;
+    if (this.lane === 0) return offset > -exit ? 1 : 0;
+    return offset < exit ? 1 : 2;
   }
 
   private observeHandRaise(
@@ -362,6 +373,7 @@ export class PoseMapper {
       setupHint: this.setupHint,
       trackingValid,
       trackingLost,
+      calibrationProgress: this.neutralX !== null ? 1 : this.calibrationStartMs === null ? 0 : Math.max(0, Math.min(1, (this.lastFrameMs - this.calibrationStartMs) / CALIBRATION_MS)),
     };
   }
 }

@@ -1,5 +1,6 @@
 import type { PoseInput } from './PoseMapper';
 import { createVideoPoseDetector, type VideoPoseDetector, type VideoPoseDetectorFactory } from './VideoPoseDetector';
+import { inferenceSize, type Lighting } from './FrameProcessing';
 
 export type CameraSessionPhase = 'off' | 'requesting' | 'loading' | 'active' | 'error';
 
@@ -7,11 +8,12 @@ export interface CameraSessionEvents {
   onPhase: (phase: CameraSessionPhase, message?: string) => void;
   onPose: (landmarks: PoseInput, timestampMs: number) => void;
   onInterrupted: (message: string) => void;
+  onLighting?: (lighting: Lighting) => void;
 }
 
 type WorkerOutput =
   | { type: 'ready' }
-  | { type: 'pose'; landmarks: PoseInput; timestampMs: number }
+  | { type: 'pose'; landmarks: PoseInput; timestampMs: number; lighting?: Lighting }
   | { type: 'error'; message: string };
 
 const FRAME_INTERVAL_MS = 67;
@@ -91,6 +93,8 @@ export class CameraSession {
             this.scheduleFrames(generation);
           } else if (message.type === 'pose') {
             this.inFlight = false;
+            if (this.framesPaused || document.hidden || performance.now() - message.timestampMs > 250) return;
+            if (message.lighting) this.events.onLighting?.(message.lighting);
             this.events.onPose(message.landmarks, message.timestampMs);
           } else {
             void this.startFallback(generation);
@@ -148,18 +152,27 @@ export class CameraSession {
       if (generation !== this.generation || this.phase !== 'active') return;
       this.rafId = requestAnimationFrame(loop);
       const video = this.video;
-      if (!video || this.framesPaused || document.hidden || this.inFlight || video.readyState < 2) return;
+      if (!video || this.framesPaused || document.hidden || video.readyState < 2) return;
+      if (this.inFlight) {
+        if (nowMs - this.lastFrameMs > 1500) void this.startFallback(generation);
+        return;
+      }
       if (nowMs - this.lastFrameMs < (this.detector ? 125 : FRAME_INTERVAL_MS) || video.currentTime === this.lastVideoTime) return;
       this.lastFrameMs = nowMs;
       this.lastVideoTime = video.currentTime;
       if (this.detector) {
-        try { this.events.onPose(this.detector.detect(video,nowMs),nowMs); }
+        try {
+          const points = this.detector.detect(video,nowMs);
+          if (this.detector.lighting) this.events.onLighting?.(this.detector.lighting);
+          this.events.onPose(points,nowMs);
+        }
         catch { this.fail('ตรวจท่าทางไม่สำเร็จ ลองเปิดกล้องใหม่ หรือใช้โหมดปัดจอ'); }
         return;
       }
       const worker = this.worker;
       this.inFlight = true;
-      void createImageBitmap(video).then(image => {
+      const size = inferenceSize(video.videoWidth, video.videoHeight);
+      void createImageBitmap(video, { resizeWidth: size.width, resizeHeight: size.height, resizeQuality: 'medium' }).then(image => {
         if (generation !== this.generation || this.worker !== worker || this.phase !== 'active' || this.framesPaused || document.hidden) {
           image.close();
           if (generation === this.generation && this.worker === worker) this.inFlight = false;

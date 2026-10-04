@@ -22,6 +22,27 @@ function calibratedMapper(): PoseMapper {
 }
 
 describe('camera gestures', () => {
+  it('reports real calibration progress and restarts it when the player moves', () => {
+    const mapper = new PoseMapper();
+    expect(mapper.ingest(pose(), 0).calibrationProgress).toBe(0);
+    expect(mapper.ingest(pose(), 750).calibrationProgress).toBe(.5);
+    expect(mapper.ingest(pose(.6), 1000).calibrationProgress).toBe(0);
+    expect(mapper.ingest(pose(.6), 2500).calibrationProgress).toBe(1);
+    mapper.recalibrate();
+    expect(mapper.ingest(pose(), 2600).calibrationProgress).toBe(0);
+  });
+  it('allows smaller movement with gentle sensitivity while retaining the calibrated center', () => {
+    const gentle = calibratedMapper(), normal = calibratedMapper();
+    gentle.setSensitivity('gentle');
+    const times = [1600, 1720, 1840, 1960];
+    const easy = times.map(time => gentle.ingest(pose(.61), time));
+    const regular = times.map(time => normal.ingest(pose(.61), time));
+    expect(easy[easy.length - 1]).toMatchObject({ calibrated: true, lane: 0 });
+    expect(regular[regular.length - 1]).toMatchObject({ calibrated: true, lane: 1 });
+    gentle.setSensitivity('steady');
+    for (const time of [2080, 2200, 2320, 2440]) expect(gentle.ingest(pose(), time).calibrated).toBe(true);
+    expect(gentle.ingest(pose(), 2560).lane).toBe(1);
+  });
   it('calibrates and chooses lanes without seeing the feet', () => {
     const mapper = calibratedMapper();
     const left = [1600, 1720, 1840, 1960].map(time => mapper.ingest(pose(0.66), time));

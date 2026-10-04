@@ -7,6 +7,17 @@ function points(left: number | null = .7, right: number | null = .7) {
   p[15]={x:.4,y:left ?? .2,visibility:left===null?0:1};p[16]={x:.6,y:right ?? .2,visibility:right===null?0:1};return p;
 }
 describe('hold to start',()=>{
+  it('requires a fresh lower cycle after a modal confirmation before starting the game', () => {
+    const hold = new HandHoldStart();
+    hold.ingest(points(), 0, true);
+    for (let time = 125; time < 1625; time += 125) expect(hold.ingest(points(.2), time, true).completed).toBe(false);
+    expect(hold.ingest(points(.2), 1625, true).completed).toBe(true);
+    hold.reset(); // The modal OK handler resets before returning to the start screen.
+    for (let time = 1750; time <= 3500; time += 125) expect(hold.ingest(points(.2), time, true).completed).toBe(false);
+    hold.ingest(points(), 3625, true);
+    for (let time = 3750; time < 5250; time += 125) expect(hold.ingest(points(.2), time, true).completed).toBe(false);
+    expect(hold.ingest(points(.2), 5250, true).completed).toBe(true);
+  });
   it('requires a neutral hand-lower first and emits completion once at 8fps',()=>{
     const h=new HandHoldStart();
     for(let t=0;t<=2000;t+=125)expect(h.ingest(points(.2),t,true).completed).toBe(false);

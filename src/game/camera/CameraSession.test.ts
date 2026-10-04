@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CameraSession, type CameraSessionPhase } from './CameraSession';
 
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('camera session', () => {
   it('returns a late permission grant after the player cancels camera setup', async () => {
@@ -165,4 +165,67 @@ it('ends an indefinitely stalled fallback with a visible error and releases the 
   finish({ detect: () => null,close });
   await starting;
   expect(close).toHaveBeenCalledOnce();
+});
+
+function workerFixture() {
+  const fixture = fallbackFixture();
+  Object.assign(fixture.video, { videoWidth: 1280, videoHeight: 720 });
+  let nextFrame!: FrameRequestCallback;
+  vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => { nextFrame = callback; return 1; }));
+  const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent) => void) | null, onerror: null };
+  const WorkerConstructor = vi.fn(function() { return worker; });
+  const image = { close: vi.fn() };
+  const bitmap = vi.fn(async () => image);
+  vi.stubGlobal('Worker', WorkerConstructor); vi.stubGlobal('createImageBitmap', bitmap);
+  Object.assign(window, { Worker: WorkerConstructor, createImageBitmap: bitmap, OffscreenCanvas: vi.fn() });
+  const detector = { detect: vi.fn(() => null), close: vi.fn() };
+  const createDetector = vi.fn(async () => detector);
+  const session = new CameraSession(fixture.events, createDetector);
+  const send = (data: unknown) => worker.onmessage?.({ data } as MessageEvent);
+  return { ...fixture, worker, image, bitmap, createDetector, session, send, frame: (time: number) => nextFrame(time) };
+}
+
+it('resizes complete worker frames and keeps only one inference in flight', async () => {
+  const fixture = workerFixture();
+  await fixture.session.start(fixture.video); fixture.send({ type: 'ready' });
+  fixture.frame(200); await Promise.resolve();
+  expect(fixture.bitmap).toHaveBeenCalledWith(fixture.video, { resizeWidth: 480, resizeHeight: 270, resizeQuality: 'medium' });
+  fixture.video.currentTime = 2; fixture.frame(300);
+  expect(fixture.bitmap).toHaveBeenCalledOnce();
+  fixture.session.stop();
+});
+
+it('drops stale or paused worker results before they can trigger a game command', async () => {
+  const fixture = workerFixture();
+  vi.spyOn(performance, 'now').mockReturnValue(600);
+  await fixture.session.start(fixture.video); fixture.send({ type: 'ready' });
+  fixture.send({ type: 'pose', timestampMs: 200, landmarks: [] });
+  expect(fixture.events.onPose).not.toHaveBeenCalled();
+  fixture.session.pauseFrames();
+  fixture.send({ type: 'pose', timestampMs: 600, landmarks: [] });
+  expect(fixture.events.onPose).not.toHaveBeenCalled();
+  fixture.session.resumeFrames();
+  fixture.send({ type: 'pose', timestampMs: 600, landmarks: [] });
+  expect(fixture.events.onPose).toHaveBeenCalledExactlyOnceWith([], 600);
+  fixture.session.stop();
+});
+
+it('recovers an in-flight worker stall while keeping the same camera stream', async () => {
+  const fixture = workerFixture();
+  await fixture.session.start(fixture.video); fixture.send({ type: 'ready' });
+  fixture.frame(200); await Promise.resolve();
+  fixture.video.currentTime = 2; fixture.frame(1801);
+  await vi.waitFor(() => expect(fixture.session.isActive).toBe(true));
+  expect(fixture.createDetector).toHaveBeenCalledOnce();
+  expect(fixture.worker.terminate).toHaveBeenCalledOnce();
+  expect(fixture.track.stop).not.toHaveBeenCalled();
+  fixture.session.stop();
+});
+
+it('closes a prepared bitmap if the player cancels before it is sent', async () => {
+  const fixture = workerFixture();
+  await fixture.session.start(fixture.video); fixture.send({ type: 'ready' });
+  fixture.frame(200); fixture.session.stop(); await Promise.resolve();
+  expect(fixture.image.close).toHaveBeenCalledOnce();
+  expect(fixture.worker.postMessage.mock.calls.some(([message]) => message.type === 'frame')).toBe(false);
 });

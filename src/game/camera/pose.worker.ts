@@ -1,5 +1,6 @@
 import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision';
 import type { PoseLandmark } from './PoseMapper';
+import { imageLighting, type Lighting } from './FrameProcessing';
 
 type Incoming =
   | { type: 'init'; wasmUrl: string; modelUrl: string }
@@ -8,11 +9,14 @@ type Incoming =
 
 type Outgoing =
   | { type: 'ready' }
-  | { type: 'pose'; landmarks: PoseLandmark[] | null; timestampMs: number }
+  | { type: 'pose'; landmarks: PoseLandmark[] | null; timestampMs: number; lighting: Lighting }
   | { type: 'error'; message: string };
 
 let landmarker: PoseLandmarker | null = null;
 let disposed = false;
+const sample = new OffscreenCanvas(32, 24);
+const sampleContext = sample.getContext('2d', { willReadFrequently: true });
+let lighting: Lighting = 'balanced', lastSample = -Infinity;
 
 function send(message: Outgoing): void {
   self.postMessage(message);
@@ -56,10 +60,15 @@ self.onmessage = async (event: MessageEvent<Incoming>) => {
     if (!disposed && landmarker) {
       const result = landmarker.detectForVideo(image, timestampMs);
       const firstPose = result.landmarks[0];
+      if (sampleContext && timestampMs - lastSample >= 500) {
+        sampleContext.drawImage(image, 0, 0, 32, 24);
+        lighting = imageLighting(sampleContext.getImageData(0, 0, 32, 24).data);
+        lastSample = timestampMs;
+      }
       send({
         type: 'pose',
         landmarks: firstPose?.map(({ x, y, visibility }) => ({ x, y, visibility })) ?? null,
-        timestampMs
+        timestampMs, lighting
       });
     }
   } catch (error) {

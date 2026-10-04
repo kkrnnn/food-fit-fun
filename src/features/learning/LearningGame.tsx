@@ -2,6 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine3D, type GraphicsQuality } from '../../game/three/GameEngine3D';
 import { CameraSession } from '../../game/camera/CameraSession';
 import { PoseMapper, type PoseOutput } from '../../game/camera/PoseMapper';
+import { readCameraTuning, saveCameraTuning, type CameraTuning } from '../../game/camera/CameraTuning';
+import type { Lighting } from '../../game/camera/FrameProcessing';
+import { CameraPreview, CameraTuningControls, CameraProblemDialog } from './CameraSetup';
 import { RunSession, LEVEL_DISTANCE, COURSE_SPEED } from '../../game/learning/RunSession';
 import { createQuestionSet, DEMO_BANK } from '../../game/learning/QuestionDeck';
 import type { InputMode, Lane, Profile, Snapshot } from '../../game/learning/types';
@@ -41,7 +44,16 @@ export function LearningGame() {
   const repository = useRef(new RunRepository());
   const analyticsSync = useRef(new AnalyticsSync(repository.current));
   const cameraRef = useRef<CameraSession | null>(null);
-  const mapper = useRef(new PoseMapper());
+  const [cameraTuning, setCameraTuning] = useState(readCameraTuning);
+  const mapper = useRef(new PoseMapper({ sensitivity: cameraTuning.lane }));
+  const floatingCameraHost = useRef<HTMLDivElement>(null);
+  const setupCameraHost = useRef<HTMLDivElement>(null);
+  const problemCameraHost = useRef<HTMLDivElement>(null);
+  const [cameraPreview, setCameraPreview] = useState<PoseOutput | null>(null);
+  const [cameraLighting, setCameraLighting] = useState<Lighting | null>(null);
+  const [cameraJumped, setCameraJumped] = useState(false);
+  const jumpFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPreviewAt = useRef(-Infinity);
   const generation = useRef(0);
   const modeRef = useRef<InputMode>(savedInputMode());
   const swipeStart = useRef<{ id: number; x: number; y: number; time: number } | null>(null);
@@ -78,6 +90,7 @@ export function LearningGame() {
   const [sessionOnly, setSessionOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const [cameraStatus, setCameraStatus] = useState('กล้องยังไม่เปิด');
+  const [cameraProblem, setCameraProblem] = useState<string | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [detectedLane, setDetectedLane] = useState<Lane>(1);
@@ -98,7 +111,7 @@ export function LearningGame() {
   const [lesson, setLesson] = useState<ReturnType<GuidedTutorial['view']> | null>(null);
   const forceTutorial = useRef(false);
   const activeProfile = useRef<Profile | null>(null);
-  const jumpDetector = useRef(new JumpGesture());
+  const jumpDetector = useRef(new JumpGesture(cameraTuning.jump));
   const jumpRef = useRef<() => void>(() => {});
   const hold = useRef(new HandHoldStart());
   const [holdProgress, setHoldProgress] = useState(0);
@@ -109,13 +122,15 @@ export function LearningGame() {
   const tutorialCheckpoint = useRef('');
   const countdownSound = useRef(0);
   const canHoldRef = useRef(false);
-  const canHold = screen === 'armed' && !settingsOpen && !introOpen && !busy;
+  const blockTorsoJump = useRef(false);
+  const canHold = mode === 'camera' && !introOpen && !busy && !deletePlayer && (cameraProblem ? cameraReady : settingsOpen ? cameraReady : screen === 'armed');
+  blockTorsoJump.current = !!cameraProblem || (screen === 'armed' && !settingsOpen);
 
 
   useEffect(() => {
     const modal = modalRef.current;
     const content = contentRef.current;
-    if (content) content.inert = introOpen || settingsOpen;
+    if (content) content.inert = introOpen || settingsOpen || !!cameraProblem;
     if (!modal) return;
     const previous = document.activeElement as HTMLElement | null;
     const controls = () => Array.from(modal.querySelectorAll<HTMLElement>('button:not(:disabled), input, select, a[href]'));
@@ -129,7 +144,7 @@ export function LearningGame() {
     };
     modal.addEventListener('keydown', trap);
     return () => { modal.removeEventListener('keydown', trap); previous?.focus(); if (content) content.inert = false; };
-  }, [introOpen, settingsOpen]);
+  }, [introOpen, settingsOpen, !!cameraProblem]);
 
   canHoldRef.current = canHold;
 
@@ -149,6 +164,8 @@ export function LearningGame() {
     generation.current++; cameraRef.current?.stop(); cameraRef.current = null;
     cameraValid.current = false; cameraCalibrated.current = false; mapper.current.reset();
     setCameraReady(false); setCameraOn(false); setCameraStatus('กล้องยังไม่เปิด');
+    setCameraPreview(null); setCameraLighting(null); setCameraJumped(false);
+    if (jumpFeedbackTimer.current !== null) clearTimeout(jumpFeedbackTimer.current);
   };
   const saveProgress = (s: Snapshot) => {
     if (sessionOnly) return;
@@ -169,6 +186,7 @@ export function LearningGame() {
       warmup.current?.setControlValid(false);
       setPauseReason(reason);setCameraStatus('ยืนนิ่งตรงกลาง ให้เห็นไหล่ถึงเอว 1.5 วินาที');
       setScreen('armed');audio.current?.quiet();
+      setCameraProblem(reason); setSettingsOpen(false);
       return;
     }
     countdownRef.current = 0; setCountdown(0);
@@ -176,7 +194,7 @@ export function LearningGame() {
     session.pause(tracking); setPauseReason(reason);
   };
   const selectLane = (lane: Lane) => {
-    if (modeRef.current !== 'manual' || settingsOpen || introOpen || document.hidden) return;
+    if (modeRef.current !== 'manual' || settingsOpen || introOpen || cameraProblem || document.hidden) return;
     if (warmup.current) { if (!countdownRef.current) warmup.current.setLane(lane); return; }
     const s = sessionRef.current?.snapshot();
     if (!s || s.paused || countdownRef.current > 0 || !['running','quiz_approach','quiz_feedback'].includes(s.phase)) return;
@@ -191,7 +209,7 @@ export function LearningGame() {
     if (next === 'camera') sessionRef.current?.invalidateControl();
   };
   jumpRef.current = () => {
-    if (!['run','warmup'].includes(screen) || countdownRef.current || settingsOpen || document.hidden) return;
+    if (!['run','warmup'].includes(screen) || countdownRef.current || settingsOpen || cameraProblem || document.hidden) return;
     const accepted=warmup.current ? warmup.current.jump() : sessionRef.current?.jump();
     if(accepted) audio.current?.cue('confirm');
   };
@@ -205,19 +223,35 @@ export function LearningGame() {
       onPhase: (phase, message) => {
         if (id !== generation.current) return;
         setCameraStatus(message || (phase === 'active' ? 'ยืนนิ่งตรงกลาง ให้เห็นไหล่ถึงเอว 1.5 วินาที' : 'กล้องยังไม่พร้อม'));
-        if (phase === 'error') { cameraValid.current = false; setCameraReady(false); pause(message || 'กล้องหยุดทำงาน', true); }
+        if (phase === 'error') {
+          cameraValid.current = false; setCameraReady(false); setCameraOn(false); setCameraPreview(null);
+          setCameraProblem(message || 'กล้องหยุดทำงาน'); setSettingsOpen(false);
+          pause(message || 'กล้องหยุดทำงาน', true);
+        }
       },
       onPose: (landmarks, time) => {
         if (id !== generation.current || document.hidden) return;
         lastPose.current = performance.now();
         const output = mapper.current.ingest(landmarks, time, performance.now());
         poseRef.current(output);
-        if(jumpDetector.current.ingest(landmarks,performance.now(), output.calibrated && output.trackingValid && !output.trackingLost && !canHoldRef.current && !countdownRef.current)) jumpRef.current();
+        const now = performance.now();
+        const jumped = jumpDetector.current.ingest(landmarks, now, output.calibrated && output.trackingValid && !output.trackingLost && !blockTorsoJump.current && !countdownRef.current);
+        if (jumped) {
+          setCameraJumped(true);
+          if (jumpFeedbackTimer.current !== null) clearTimeout(jumpFeedbackTimer.current);
+          jumpFeedbackTimer.current = setTimeout(() => setCameraJumped(false), 700);
+          jumpRef.current();
+        }
+        if (now - lastPreviewAt.current >= 100 || jumped) {
+          lastPreviewAt.current = now;
+          setCameraPreview(output);
+        }
         const h = hold.current.ingest(landmarks, performance.now(), canHoldRef.current && output.calibrated && output.trackingValid && !output.trackingLost);
         setHoldProgress(h.progress);
         if (h.completed) { audio.current?.cue('hold'); startRef.current(); }
       },
       onInterrupted: message => { if (id === generation.current) pause(message, true); },
+      onLighting: lighting => { if (id === generation.current) setCameraLighting(lighting); },
     });
     cameraRef.current = camera; void camera.start(videoRef.current);
   };
@@ -226,15 +260,32 @@ export function LearningGame() {
     cameraValid.current = valid; cameraCalibrated.current = output.calibrated;
     setCameraReady(valid);
     if (valid && output.lane !== undefined) {
-      setDetectedLane(output.lane); warmup.current?.setLane(output.lane, true); sessionRef.current?.setLane(output.lane, true);
-      setCameraStatus(`พร้อม · เลน${laneNames[output.lane]}`);
+      setDetectedLane(output.lane);
+      if (!settingsOpen && !cameraProblem) { warmup.current?.setLane(output.lane, true); sessionRef.current?.setLane(output.lane, true); }
+      setCameraStatus('กล้องพร้อมใช้งาน');
     } else {
-      warmup.current?.setLane(detectedLane, false); sessionRef.current?.invalidateControl();
+      if (!settingsOpen && !cameraProblem) { warmup.current?.setLane(detectedLane, false); sessionRef.current?.invalidateControl(); }
       if (output.setupHint === 'show-upper-body') setCameraStatus('ให้เห็นไหล่ถึงเอว และกลับมาตรงกลาง');
+      else if (output.setupHint === 'stand-still') setCameraStatus('อยู่นิ่งตรงกลางอีกนิด เพื่อตั้งท่าให้ตรง');
       else if (!output.calibrated) setCameraStatus('ยืนนิ่งตรงกลาง 1.5 วินาที เพื่อตั้งท่ากลาง');
     }
     // Hold-start is isolated from gameplay and legacy jump pulses.
-    if (output.trackingLost) pause('จับท่าหลุด เกมพักไว้แล้ว กลับมาในกรอบหรือใช้ปุ่มแทน', true);
+    if (output.trackingLost && !settingsOpen && !cameraProblem) {
+      if (sessionRef.current) pause('จับท่าหลุด กลับมาให้เห็นไหล่ถึงเอว หรือใช้ปุ่มแทน', true);
+      else if (output.calibrated) setCameraProblem('จับท่าหลุด กลับมาให้เห็นไหล่ถึงเอว');
+    }
+  };
+  const tuneCamera = (next: CameraTuning) => {
+    mapper.current.setSensitivity(next.lane); jumpDetector.current.setSensitivity(next.jump);
+    setCameraTuning(next); setCameraJumped(false);
+    if (!saveCameraTuning(next)) setNotice('ปรับความไวได้ในครั้งนี้ แต่บันทึกลงเครื่องไม่ได้');
+  };
+  const recenterCamera = () => {
+    mapper.current.recalibrate(); jumpDetector.current.reset(); hold.current.reset();
+    cameraValid.current = false; cameraCalibrated.current = false;
+    setCameraReady(false); setHoldProgress(0); setCameraJumped(false);
+    setCameraPreview(null);
+    setCameraStatus('ยืนนิ่งตรงกลาง 1.5 วินาที เพื่อตั้งท่ากลาง');
   };
 
   useEffect(() => {
@@ -274,6 +325,7 @@ export function LearningGame() {
     };
     document.addEventListener('visibilitychange', onVisibility); window.addEventListener('keydown', onKey);
     return () => { cancelAnimationFrame(frame); generation.current++; cameraRef.current?.stop(); engineRef.current?.destroy(); engineRef.current = null;
+      if (jumpFeedbackTimer.current !== null) clearTimeout(jumpFeedbackTimer.current);
       audio.current?.destroy();
       document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('keydown', onKey); };
   }, []);
@@ -287,16 +339,22 @@ export function LearningGame() {
       const now = performance.now();
       if (now - lastPose.current > 250) { cameraValid.current = false; setCameraReady(false); session?.invalidateControl(); warmup.current?.setLane(detectedLane,false); }
       const tick = mapper.current.tick(now);
-      if (tick.trackingLost && session && !recovery.current.active && (!session.snapshot().paused || warmup.current || countdownRef.current>0)) pause('ไม่พบตัวผู้เล่น เกมพักไว้แล้ว', true);
+      if (now - lastPose.current > 250) {
+        setCameraPreview(current => current?.trackingValid ? tick : current);
+      }
+      if (tick.trackingLost && !settingsOpen && !cameraProblem) {
+        if (session && !recovery.current.active && (!session.snapshot().paused || warmup.current || countdownRef.current>0)) pause('ไม่พบตัวผู้เล่น กลับมาให้เห็นไหล่ถึงเอว', true);
+        else if (!session && tick.calibrated) setCameraProblem('ไม่พบตัวผู้เล่น กลับมาให้เห็นไหล่ถึงเอว');
+      }
     }
     if (session && warmup.current) {
       const valid = modeRef.current === 'manual' || cameraValid.current;
-      if (countdownRef.current > 0 && valid && !document.hidden && !settingsOpen) {
+      if (countdownRef.current > 0 && valid && !document.hidden && !settingsOpen && !cameraProblem) {
         const count=Math.ceil(countdownRef.current);if(count!==countdownSound.current)audio.current?.cue('countdown');countdownSound.current=count;
         countdownRef.current = Math.max(0,countdownRef.current-dt);setCountdown(Math.ceil(countdownRef.current));
       }
       if (modeRef.current === 'manual') warmup.current.setControlValid(true);
-      warmup.current.advance(dt, screen === 'warmup' && !countdownRef.current && !document.hidden && !settingsOpen && valid);
+      warmup.current.advance(dt, screen === 'warmup' && !countdownRef.current && !document.hidden && !settingsOpen && !cameraProblem && valid);
       const view = warmup.current.view(session.snapshot());
       if (!countdownRef.current) countdownSound.current=0;
       const checkpoint = `${view.stage}:${view.success}`;
@@ -313,13 +371,13 @@ export function LearningGame() {
       return;
     }
     if (session) {
-      if (countdownRef.current > 0 && !document.hidden) {
+      if (countdownRef.current > 0 && !document.hidden && !cameraProblem) {
         if (modeRef.current === 'camera' && !cameraValid.current) {
           pause('กล้องยังไม่พร้อม กลับมาตั้งท่าและยกมือค้างเพื่อเล่นต่อ', true);
         }
         else { countdownRef.current = Math.max(0, countdownRef.current - dt); setCountdown(Math.ceil(countdownRef.current)); if (!countdownRef.current) session.resume(); }
       }
-      if (!document.hidden && !settingsOpen) session.advance(dt);
+      if (!document.hidden && !settingsOpen && !cameraProblem) session.advance(dt);
       const s = session.snapshot();
       audio.current?.ambient(!s.paused && s.phase !== 'terminal' && !document.hidden && !countdownRef.current);
       const count = Math.ceil(countdownRef.current);
@@ -383,7 +441,17 @@ export function LearningGame() {
     } catch (e) { setNotice(e instanceof Error ? e.message : 'เริ่มรอบไม่สำเร็จ'); }
     finally { setBusy(false); startPending.current = false; }
   };
-  startRef.current = () => { if (!startPending.current) void start(activeProfile.current ?? undefined); };
+  const confirmCameraProblem = () => {
+    hold.current.reset(); setHoldProgress(0); setCameraProblem(null);
+    if (recovery.current.active) void start(activeProfile.current ?? undefined);
+  };
+  const confirmSettings = () => { hold.current.reset(); setHoldProgress(0); setSettingsOpen(false); };
+  startRef.current = () => {
+    if (startPending.current) return;
+    if (cameraProblem) confirmCameraProblem();
+    else if (settingsOpen) confirmSettings();
+    else void start(activeProfile.current ?? undefined);
+  };
   const finishTutorial = (status: 'completed' | 'skipped') => {
     const selected = activeProfile.current; let session = sessionRef.current;
     if (!selected || !session || !warmup.current) return;
@@ -452,7 +520,8 @@ export function LearningGame() {
     onLostPointerCapture={() => { swipeStart.current = null; }}>
 
     <div ref={sceneRef} className="lr-scene" aria-hidden="true" />
-    <aside hidden={!cameraOn} className={`lr-camera ${inRun ? 'playing' : ''} ${settingsOpen ? 'in-settings' : ''}`}><video ref={videoRef} autoPlay playsInline muted /><div>{cameraStatus}</div><small>ตรวจเลน: {laneNames[detectedLane]} · ภาพไม่ถูกบันทึก</small></aside>
+    <div ref={floatingCameraHost} hidden={!cameraOn || settingsOpen || !!cameraProblem} className={`lr-camera-float ${inRun ? 'playing' : ''}`} />
+    <CameraPreview placement={cameraProblem ? 'problem' : settingsOpen && mode === 'camera' ? 'settings' : 'floating'} setupHost={setupCameraHost} problemHost={problemCameraHost} floatingHost={floatingCameraHost} videoRef={videoRef} on={cameraOn} status={cameraStatus} output={cameraPreview} jumped={cameraJumped} compact={!!cameraProblem || (inRun && !settingsOpen)} />
     <div ref={contentRef} className="lr-content">{inRun && s ? <>
       {mode === 'manual' && (!s.paused || inPractice) && <small className="lr-swipe-hint">ปัดซ้าย–ขวาเปลี่ยนเลน · ปัดขึ้นกระโดด</small>}
       {notice && <div className="lr-run-notice" role="status">{notice}</div>}
@@ -510,15 +579,20 @@ export function LearningGame() {
     </div></div>}
     </div>
     {introOpen && <div className="lr-modal-shade"><section ref={modalRef} className="lr-welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title"><span className="lr-welcome-icon">✦</span><p className="lr-kicker">WELCOME TO FOOD FIT FUN</p><h2 id="welcome-title">พร้อมสนุกไปด้วยกันไหม?</h2><section><h3>Objective</h3><div>{OBJECTIVE_COPY.map(text => <p key={text}>{text}</p>)}</div></section><p className="lr-data-notice">เมื่อเปิดใช้การส่งข้อมูล ชื่อเล่น เพศ อายุ เป้าพลังงานต่อวันโดยประมาณ พลังงานและรายการอาหารในเกม เวอร์ชันสูตร คะแนนตอบคำถาม คะแนนเกม ดาวความสนุก และความคิดเห็นจะส่งไปเก็บที่ Supabase เพื่อวิเคราะห์รวมหลายเครื่อง ภาพกล้อง ส่วนสูง น้ำหนัก และคำตอบรายข้อเก็บอยู่ในเครื่อง</p><label className="lr-checkbox"><input type="checkbox" checked={introChecked} onChange={e => setIntroChecked(e.target.checked)} />อ่าน Objective แล้ว</label><button disabled={!introChecked} onClick={() => { audio.current?.cue('confirm'); setIntroOpen(false); }}>OK · ไปกันเลย →</button></section></div>}
-    {settingsOpen && <div className="lr-modal-shade"><section ref={modalRef} className="lr-settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><p className="lr-kicker">ปรับก่อนออกวิ่ง</p><h2 id="settings-title">SETTINGS</h2>
+    {cameraProblem && <CameraProblemDialog ref={modalRef} reason={cameraProblem} status={cameraStatus} ready={cameraReady} on={cameraOn} lighting={cameraLighting} previewHost={problemCameraHost} calibrationProgress={cameraPreview?.calibrationProgress ?? 0} holdProgress={holdProgress} recovering={recovery.current.active}
+      onContinue={confirmCameraProblem}
+      onRestart={beginCamera} onRecenter={recenterCamera}
+      onManual={() => { setCameraProblem(null); chooseMode('manual'); if (recovery.current.active || screen === 'armed') void start(activeProfile.current ?? undefined); }}
+      onExit={() => { setCameraProblem(null); leaveRun(); }} />}
+    {settingsOpen && !cameraProblem && <div className="lr-modal-shade"><section ref={modalRef} className={`lr-settings-modal ${mode === 'camera' ? 'lr-camera-settings-modal' : ''}`} role="dialog" aria-modal="true" aria-labelledby="settings-title"><p className="lr-kicker">ปรับก่อนออกวิ่ง</p><div className="lr-settings-heading"><h2 id="settings-title">ตั้งค่าการเล่น</h2><button className="secondary" aria-label="ปิดการตั้งค่า" onClick={() => setSettingsOpen(false)}>ปิด ✕</button></div>
       <div className="lr-mode"><button className={mode === 'camera' ? 'selected secondary' : 'secondary'} aria-pressed={mode === 'camera'} onClick={() => chooseMode('camera')}><strong>◎ กล้อง</strong><small>ขยับไหล่ซ้าย–ขวา</small></button><button className={mode === 'manual' ? 'selected secondary' : 'secondary'} aria-pressed={mode === 'manual'} onClick={() => chooseMode('manual')}><strong>⌨ คีย์บอร์ด / ปัดจอ</strong><small>← / → หรือ A / D · มือถือปัดซ้าย–ขวา</small></button></div>
-      {mode === 'camera' && <div className="lr-camera-setup"><p>{cameraStatus}</p><button className="secondary" onClick={beginCamera}>เปิด / ตั้งกล้อง</button><p className="lr-muted">ยืนนิ่งให้เห็นไหล่ถึงเอว ภาพประมวลผลในเครื่อง</p></div>}
+      {mode === 'camera' && <section className="lr-camera-settings"><div ref={setupCameraHost} className="lr-camera-setup-preview" /><CameraTuningControls tuning={cameraTuning} onChange={tuneCamera} onRecenter={recenterCamera} onOpen={beginCamera} on={cameraOn} ready={cameraReady} status={cameraStatus} holdProgress={holdProgress} /></section>}
       <div className="lr-quality"><span>คุณภาพภาพ</span>{(['low','medium','high'] as const).map((v,i) => <button className="secondary" aria-pressed={v === quality} key={v} onClick={() => setGraphics(v)}>{['เบา','กลาง','สูง'][i]}</button>)}</div>
       <fieldset className="lr-audio-settings"><legend>เสียงและเอฟเฟกต์</legend>{(['sfx','ambient'] as const).map(channel=><label key={channel}>{channel==='sfx' ? 'เสียงเอฟเฟกต์' : 'เสียงบรรยากาศ'} · {Math.round(audioPreferences[channel]*100)}%<input type="range" min="0" max="1" step="0.05" value={audioPreferences[channel]} onChange={e => { const next={...audioPreferences,[channel]:Number(e.target.value)};setAudioPreferences(next);if(!audio.current?.configure(next))setNotice('ตั้งค่าได้ในรอบนี้ แต่บันทึกลงเครื่องไม่ได้'); }} /></label>)}<div className="lr-actions"><button className="secondary" onClick={() => { const next={...audioPreferences,sfx:0,ambient:0};setAudioPreferences(next);audio.current?.configure(next); }}>ปิดเสียงทั้งหมด</button><button className="secondary" onClick={async () => { await audio.current?.unlock();audio.current?.cue('correct');if(!audio.current?.ready)setNotice('เบราว์เซอร์ยังไม่เปิดเสียง เล่นแบบเงียบได้'); }}>ลองเสียง</button></div><label className="lr-checkbox"><input type="checkbox" checked={audioPreferences.reducedMotion} onChange={e=>{const next={...audioPreferences,reducedMotion:e.target.checked};setAudioPreferences(next);audio.current?.configure(next);}} />ลดการเคลื่อนไหวของเอฟเฟกต์</label></fieldset>
       {profile && <button className="secondary" onClick={() => { forceTutorial.current=true;setSettingsOpen(false);requestPlay(profile); }}>ฝึกอีกครั้ง</button>}
       <p>ชุดคำถามงานวิจัย · สุ่ม 10 ข้อจาก 25 ข้อในแต่ละรอบ</p>
       {data.profiles.length > 0 && <label>ผู้เล่น<select value={profile?.playerId ?? ''} onChange={e => { const p = data.profiles.find(p => p.playerId === e.target.value); if (p) { setProfile(p); avatarRef.current = p.avatar; } }}><option value="">เลือกผู้เล่น</option>{data.profiles.map(p => <option key={p.playerId} value={p.playerId}>{p.nickname}</option>)}</select></label>}
-      <div className="lr-actions"><button className="secondary" onClick={() => { setSettingsOpen(false); edit(newProfile()); }}>＋ ผู้เล่นใหม่</button><button onClick={() => setSettingsOpen(false)}>เรียบร้อย ✓</button></div>
+      <div className="lr-actions"><button className="secondary" onClick={() => { setSettingsOpen(false); edit(newProfile()); }}>＋ ผู้เล่นใหม่</button><button onClick={confirmSettings}>เรียบร้อย ✓</button></div>
       {profile && <button className="lr-link" onClick={() => setDeletePlayer(true)}>ล้างข้อมูลผู้เล่นนี้</button>}
       {deletePlayer && profile && <div className="lr-confirm"><p>ล้างโปรไฟล์ คะแนน ประวัติ ดาว และคิวรอส่งของ {profile.nickname} ในเครื่องนี้? ข้อมูลที่ส่งส่วนกลางแล้วยังอยู่ และอาจถูกถามดาวใหม่</p><div className="lr-actions"><button onClick={async () => { await writeQueue.current; try { await repository.current.clear(profile.playerId);tutorialMemory.current?.clear(profile.playerId); await refresh(); setProfile(null); setDeletePlayer(false); } catch { setNotice('ล้างข้อมูลไม่สำเร็จ'); } }}>ยืนยันล้าง</button><button className="secondary" onClick={() => setDeletePlayer(false)}>ยกเลิก</button></div></div>}
     </section></div>}

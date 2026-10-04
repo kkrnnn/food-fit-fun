@@ -199,3 +199,77 @@
 
 /* Pickup narration is accessible; its visible amount lives in the scene burst. */
 .lr-kcal-pickups {position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;clip-path:inset(50%)!important;white-space:nowrap!important}
+
+/* Camera setup: one large, inline preview; a quiet miniature during play. */
+.lr-camera-settings-modal {width:min(960px,100%)}
+.lr-settings-heading {display:flex;align-items:center;justify-content:space-between;gap:12px}.lr-settings-heading h2 {margin:8px 0}.lr-settings-heading button {font-size:13px;padding:8px 12px;flex-shrink:0}
+.lr-camera-settings {display:grid;grid-template-columns:minmax(240px,.9fr) minmax(300px,1.1fr);gap:26px;padding:20px 0 24px;border-bottom:1px solid var(--line);align-items:start}
+.lr-camera-setup-preview {min-width:0}
+.lr-camera-view {overflow:hidden;border:1px solid #cdc7db;border-radius:16px;background:#252337;color:#fff}
+.lr-camera-stage {position:relative;background:#252337;overflow:hidden}
+.lr-camera-stage video {display:block;width:100%;height:100%;object-fit:contain;transform:scaleX(-1)}
+.lr-camera-empty {position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;background:radial-gradient(ellipse at center,#3e3950,#252337)}
+.lr-camera-empty>span {font-size:44px;color:#c6bce0}
+.lr-camera-empty strong {font-size:17px}.lr-camera-empty small {font-size:13px;color:#d8d1e6}
+.lr-camera-readout {padding:14px}.lr-camera-readout p {font-size:14px;line-height:1.55;margin:0 0 10px}
+.lr-camera-readout small {display:block;font-size:11px;color:#d4cedf;margin-top:12px}
+.lr-camera-readout progress {margin:10px 0 14px}
+.lr-camera-readout .lr-camera-jump-response {color:#b7ffe6}
+.lr-camera-problem-shade {z-index:24}
+.lr-camera-problem h2 {font-size:24px;margin:8px 0 12px}.lr-camera-problem>p {font-size:14px;line-height:1.6}
+.lr-camera-problem-preview {width:min(280px,100%);margin:18px auto}
+.lr-camera-problem .lr-camera-light {color:#805c1e;background:#fff1cf;padding:10px 12px;border-radius:8px}
+.lr-camera-problem .lr-actions {gap:8px}.lr-camera-problem .lr-actions button {font-size:14px;padding:10px 12px}
+.lr-camera-confirm-gesture {margin:16px 0;padding:12px 14px;border:1px solid #a9cdbc;border-radius:10px;background:#e5f5ed;color:#285e4e}.lr-camera-confirm-gesture p {font-size:13px;line-height:1.6;margin:0 0 10px}
+.lr-camera-setup-actions {display:flex;flex-wrap:wrap;gap:8px}.lr-camera-setup-actions button {font-size:14px;padding:10px 13px}
+.lr-camera-guidance {font-size:14px;line-height:1.7;color:#594974;margin:14px 0 20px}
+.lr-camera-tuning fieldset {margin:18px 0}.lr-camera-tuning legend {margin-bottom:10px;font-size:15px}
+.lr-camera-tuning fieldset p {font-size:12px;color:#6c617b;line-height:1.6;margin:9px 0 0}
+.lr-camera-sensitivity {display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.lr-camera-sensitivity button {font-size:13px;padding:9px 5px;min-height:44px;line-height:1.4;white-space:normal}
+.lr-camera-sensitivity button[aria-pressed=true] {background:#d6efe5;color:#175d4a;border-color:#458d79;box-shadow:inset 0 0 0 1px #458d79}
+.lr-camera-float {position:absolute;right:18px;bottom:18px;width:220px;z-index:7}.lr-camera-float[hidden] {display:none}
+.lr-camera-float.playing {width:140px;bottom:24px;pointer-events:none}
+@media(max-width:700px) {
+  .lr-camera-settings {grid-template-columns:1fr;gap:18px;padding-top:12px}
+  .lr-camera-setup-preview {width:100%;max-width:390px;margin:0 auto}
+  .lr-camera-sensitivity button {font-size:12px}.lr-camera-settings-modal .lr-mode {margin:16px 0}
+  .lr-camera-float {width:160px;right:10px;bottom:10px;pointer-events:none}
+  .lr-camera-float.playing {width:85px;right:8px;bottom:58px}
+}
+
+/* Standing camera play: instructions must be readable from across the room. */
+.lr-camera-mode {--camera-copy:clamp(24px,2.2vw,28px);--camera-action:24px}
+.lr-camera-mode .lr-modal-shade p,.lr-camera-mode .lr-modal-shade label,
+.lr-camera-mode .lr-modal-shade legend,.lr-camera-mode .lr-pause p {font-size:var(--camera-copy);line-height:1.5;color:var(--ink)}
+.lr-camera-mode .lr-modal-shade h2,.lr-camera-mode .lr-pause h2 {font-size:36px;line-height:1.3}
+.lr-camera-mode .lr-modal-shade h3 {font-size:28px}
+.lr-camera-mode .lr-modal-shade button,.lr-camera-mode .lr-pause button {font-size:var(--camera-action);min-height:60px;padding:12px 18px;line-height:1.4}
+.lr-camera-mode .lr-modal-shade input,.lr-camera-mode .lr-modal-shade select {font-size:24px}
+.lr-camera-mode .lr-modal-shade small,.lr-camera-mode .lr-modal-shade .lr-quality,
+.lr-camera-mode .lr-modal-shade .lr-camera-readout small {font-size:20px;color:#57496c}
+.lr-camera-mode .lr-modal-shade .lr-kicker {font-size:21px;color:#6244c9}
+.lr-camera-mode .lr-camera-settings {grid-template-columns:minmax(240px,.8fr) minmax(0,1.2fr)}
+.lr-camera-mode .lr-camera-readout p {color:white}
+.lr-camera-mode .lr-camera-readout small {color:#ded6ee}
+.lr-camera-mode .lr-camera-empty strong {font-size:24px}.lr-camera-mode .lr-camera-empty small {font-size:20px;color:#ded6ee}
+.lr-camera-mode .lr-camera-confirm-gesture {padding:16px 18px}
+.lr-camera-mode .lr-camera-confirm-gesture p {color:#20533f}
+.lr-camera-mode .lr-camera-confirm-gesture progress {height:12px}
+.lr-camera-mode .lr-camera-sensitivity {gap:8px}
+.lr-camera-mode .lr-camera-sensitivity button {font-size:22px;padding:12px 8px}
+.lr-camera-mode .lr-camera-problem {width:min(960px,100%)}
+.lr-camera-problem-body {display:grid;grid-template-columns:minmax(160px,.65fr) minmax(0,1.35fr);gap:24px;align-items:start}
+.lr-camera-problem-body .lr-camera-problem-preview {width:100%;margin:16px 0;max-width:280px}
+.lr-camera-problem-controls {min-width:0}
+.lr-camera-mode .lr-camera-problem .lr-actions {gap:12px}
+@media(max-width:700px) {
+  .lr-camera-mode {--camera-copy:22px;--camera-action:22px}
+  .lr-camera-mode .lr-modal-shade h2 {font-size:30px}
+  .lr-camera-mode .lr-camera-settings,.lr-camera-problem-body {grid-template-columns:1fr;gap:12px}
+  .lr-camera-problem-body .lr-camera-problem-preview {width:160px;margin:0 auto}
+  .lr-camera-mode .lr-camera-problem .lr-actions {display:grid;grid-template-columns:1fr 1fr}
+  .lr-camera-mode .lr-camera-problem .lr-actions button:first-child {grid-column:1/-1}
+  .lr-camera-mode .lr-camera-sensitivity {grid-template-columns:1fr}
+  .lr-camera-mode .lr-modal-shade .lr-kicker {font-size:18px}
+}
