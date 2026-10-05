@@ -17,7 +17,7 @@ begin
     'nutritionVersion','food-portions-2026-10-04-v1','scoringVersion','learning-distance-1500-v3',
     'collectedFoods','[{"foodId":"BANANA","name":"กล้วย","portionLabel":"1 ผลกลาง · ส่วนกินได้ 126 g","kcalPerPortion":110,"count":2}]'::jsonb));
   if public.score_feedback_ingest(player,repeat('c',64),p) <> 'ok' then raise exception 'kcal insert failed'; end if;
-  if not exists(select 1 from public.score where id=run_key and bmi_start is null and bmi_end is null
+  if not exists(select 1 from public.score where id=run_key
     and daily_energy_kcal=1700.09 and food_intake_kcal=220 and run_schema_version=2 and collected_foods->0->>'count'='2') then raise exception 'kcal snapshot missing'; end if;
   perform public.score_feedback_ingest(player,repeat('c',64),jsonb_set(p,'{run,foodIntakeKcal}','999'));
   if (select food_intake_kcal from public.score where id=run_key) <> 220 then raise exception 'retry overwrote snapshot'; end if;

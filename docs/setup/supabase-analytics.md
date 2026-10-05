@@ -63,6 +63,12 @@ Applied `20261004000300_exercise_energy.sql` และ `register-exercise-energy
 
 ค่ากิจกรรมใช้ NCCOR Youth Compendium + Schofield สำหรับ 6–18 ปี และ 2024 Adult Compendium สำหรับ 19–59 ปี: 1 pickup แทนกิจกรรมจำลอง 1 นาที รองรับ null/unavailable และตรวจ source/code/MET/เวลา/จำนวน/ยอดรวม ไม่ส่งน้ำหนักหรือส่วนสูงโดยตรง ต้องลง migration ก่อน API ที่ประกาศ exerciseEnergyVersion=2 Client จะรอใน outbox จนพร้อม โดยไม่ทิ้งค่าหักของรอบใหม่ ดู [แหล่งอ้างอิง](../research/exercise-energy-reference.md) และ [QA](../qa/kcal-game-verification.md)
 
-## Balance 15 นาที — รออนุมัติขึ้น live
+## Balance 15 นาที
 
-Migration `20261004000400_exercise_game_balance.sql` และ register script เตรียมสำหรับ model `nccor-youth+adult-met-gross-15min-v2` กับ API `exerciseEnergyVersion=3` แล้ว ยังไม่ applied live เนื่องจาก auto-review ต้องการยืนยันระยะเวลาและ live mutation ชัดเจน Client เก็บรอบใหม่ไว้ใน outbox เมื่อพบ API รุ่น 2; migration ใหม่ยอมรับค่ารอบ 1 นาทีเดิมโดยไม่แก้ประวัติ ดู [แผนและ validation](../plans/kcal-game-balance.md)
+Applied migration `20261004000400_exercise_game_balance.sql` and registered version on production Supabase on 2026-10-04. It supports `nccor-youth+adult-met-gross-15min-v2` and preserves legacy snapshots; see [plan and validation](../plans/kcal-game-balance.md).
+
+## ลดคอลัมน์ข้อมูลคะแนนเก่า (2026-10-04)
+
+Migration `20261004000500_score_kcal_only.sql` คงสองตาราง `score` และ `feedback` พร้อมแถวเดิมและ feedback เดิมไว้ แต่ลบคอลัมน์ BMI, คะแนนแบบทดสอบ/เกม, `demo` และเวลาเริ่มที่ไม่ได้ใช้ในรายงาน kcal แล้ว `score` ยังเก็บข้อมูลที่จำเป็นต่อการกันส่งซ้ำ/ตรวจสิทธิ์, เชื่อม feedback, ตรวจกิจกรรมจากอายุและเพศ, คัดข้อมูล QA, เวลาเล่นจบ และ snapshot พลังงาน ตั้งแต่ `run_schema_version` กับ kcal เป็นต้นไป ประวัติเดิมที่ไม่มี kcal จะไม่ถูกคำนวณย้อนหลัง; ค่า BMI/คะแนนจาก payload เก่าที่ยังค้างใน outbox จะไม่ถูกเก็บเป็นคอลัมน์
+
+Migration 005 ต่อจาก 004 ซึ่ง apply และลงทะเบียนบน production แล้ว จำนวนก่อนตัดคอลัมน์คือ 30 แถวใน `score` และ 4 แถวใน `feedback`. หากใช้ SQL Editor ให้รัน `20261004000500_score_kcal_only.sql` แล้ว `supabase/register-score-kcal-only.sql`; CLI `db push` ลงทะเบียนให้อัตโนมัติ Regression rollback-only อยู่ที่ `supabase/tests/score-kcal-only.sql` และ export query ถูกปรับให้ไม่อ่านคอลัมน์ที่ถอดออก Migration 005 อยู่ใน repo แต่ยังไม่ได้ apply กับ production เพราะรอการยืนยันหน้าคำเตือนการลบคอลัมน์

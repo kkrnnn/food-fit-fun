@@ -21,7 +21,7 @@ begin
   p := p->'run' || '{"exerciseModelVersion":"nccor-youth+adult-met-gross-15min-v2","exerciseKcal":101.00046,"netEnergyKcal":-101.00046,"exerciseEnergyStatus":"available","exerciseEnergyReason":"","collectedExercises":[{"itemType":"ROPE","count":1,"kcalPerPickup":101.00046,"durationMinutes":15,"activityLabel":"กระโดดเชือก","activityCode":"10260X","metKind":"METy","metValue":7.1,"sourceUrl":"https://www.nccor.org/tools-youthcompendium/met-view-all-categories/","basis":"gross","estimated":true}]}';
   p := jsonb_build_object('kind','run','run',p);
   if public.score_feedback_ingest(player,repeat('c',64),p) <> 'ok' then raise exception 'exercise insert failed'; end if;
-  if not exists(select 1 from public.score where id=run_key and bmi_start is null and bmi_end is null
+  if not exists(select 1 from public.score where id=run_key
     and daily_energy_kcal=1700.09 and food_intake_kcal=0 and exercise_kcal=101.00046 and net_energy_kcal=-101.00046 and collected_exercises->0->>'count'='1') then raise exception 'exercise snapshot missing'; end if;
   perform public.score_feedback_ingest(player,repeat('c',64),jsonb_set(p,'{run,foodIntakeKcal}','999'));
   if (select food_intake_kcal from public.score where id=run_key) <> 0 then raise exception 'retry overwrote snapshot'; end if;
